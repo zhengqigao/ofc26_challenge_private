@@ -184,6 +184,7 @@ if __name__ == "__main__":
     parser.add_argument("--save_model_name", type=str, default="model.pt")
     parser.add_argument("--nn_type", type=str, default="BasicFNN")
     parser.add_argument("--save_best", action="store_true", default=False) # default save the model after the last epoch, if save_best is True, save the model when the validation loss is the best
+
     args = parser.parse_args()
     
     X_train = pd.read_csv(TRAIN_FEATURE_PATH).iloc[:, 3:]
@@ -219,10 +220,10 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if args.nn_type == "BasicFNN":
         base_model = BasicFNN(X_tensor.shape[1], Numchannels).to(device)
-    elif args.nn_type == "BasicCNN":
-        base_model = BasicCNN(X_tensor.shape[1], Numchannels).to(device)
+    elif args.nn_type == "LinearGateNet":
+        base_model = LinearGateNet().to(device)
     else:
-        raise ValueError(f"Invalid nn_type: {args.nn_type}, please define it in utils/models.py")
+        raise ValueError(f"Invalid nn_type: {args.nn_type}")
 
     optimizer = optim.Adam(base_model.parameters(), lr=args.lr)
 
@@ -281,6 +282,11 @@ if __name__ == "__main__":
     X_test_full = pd.read_csv(TEST_FEATURE_PATH)
     
     X_test = X_test_full.iloc[:, 5:]
+    
+    
+    # print(f"X_tensor.shape: {X_tensor.shape}")
+    # print(f"y_tensor.shape: {y_tensor.shape}")
+    # print(f"X_test.shape: {X_test.shape}")
     # Predict on test set
     best_model.eval()
     X_test_np = X_test.values.astype(np.float32)

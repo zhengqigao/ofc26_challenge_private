@@ -23,105 +23,102 @@ class BasicFNN(nn.Module):
         )
         
     def forward(self, x):
+        x[:,4::2] = x[:,4::2] / 100 # normalization 
         return self.layers(x)
-    
-# utils/models.py
+
+class CustomFNN(nn.Module):
+    def __init__(self, input_dim, output_dim):
+        super().__init__()
+        # input is [batch, 194]
+        # the 0,1,2,3 columns are continuous values, system-level parameters
+        # then 4-th column is continus value, and 5-th column is a latent control variable (either 0 or 1) associated with the 4-th column
+        # then 6-th column is continus value, and 7-th column is a latent control variable (either 0 or 1) associated with the 6-th column
+        # ...192-th column is continus value, and 193-th column is a latent control variable (either 0 or 1) associated with the 192-th column
+
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 
-class ResidualConvBlock(nn.Module):
-    """Residual 1D conv block: [B,C,T] -> [B,C,T]."""
-    def __init__(self, channels: int, kernel_size: int = 5, dropout: float = 0.1):
-        super().__init__()
-        pad = kernel_size // 2
-        self.conv1 = nn.Conv1d(channels, channels, kernel_size, padding=pad)
-        self.conv2 = nn.Conv1d(channels, channels, kernel_size, padding=pad)
-        self.dropout = nn.Dropout(dropout)
-        self.act = nn.ReLU()
-
-    def forward(self, x):
-        h = self.act(self.conv1(x))
-        h = self.dropout(h)
-        h = self.conv2(h)
-        return self.act(x + h)
-
-
-class BasicCNN(nn.Module):
+class LinearGateNet(nn.Module):
     """
-    Drop-in replacement for your current BasicFNN:
-      input:  [B, 4 + 95 + 95]  (global + spectra + wss)
-      output: [B, 95]          (gain spectrum)
+    Input:  [B, 194]s
+      - x[:,:4] are global continuous
+      - x[:,4:] are pairs (v_i, c_i) with c_i in {0,1}
+        v_i at even offset, c_i at odd offset
+
+    Output: [B, out_dim]  (e.g., 95)
     """
+
     def __init__(
         self,
-        input_dim: int,
-        output_dim: int,
-        n_bins: int = 95,
+        out_dim: int = 1,
         global_dim: int = 4,
-        global_hidden: int = 64,
-        global_out: int = 64,
-        conv_channels: int = 64,
-        conv_layers: int = 4,
-        kernel_size: int = 5,
-        dropout: float = 0.1,
+        global_hidden_list: list[int] = [4, 4],
+        token_hidden_list: list[int] = [1, 2, 4],
+        head_hidden_list: list[int] = [16,32,64,32,16,8,1],
     ):
         super().__init__()
-        assert output_dim == n_bins, f"Expected output_dim=={n_bins}, got {output_dim}"
-        assert input_dim == global_dim + 2 * n_bins, (
-            f"Expected input_dim=={global_dim}+2*{n_bins}={global_dim + 2*n_bins}, got {input_dim}"
-        )
-
-        self.n_bins = n_bins
+        
+        
         self.global_dim = global_dim
+        assert global_hidden_list[0] == global_dim
+        assert token_hidden_list[0] == 1
+        # for global features 4 -> global_hidden_list[-1]
+        layer_list = []
+        for i in range(len(global_hidden_list)-1):
+            layer_list.append(nn.Linear(global_hidden_list[i], global_hidden_list[i+1]))
+            layer_list.append(nn.ReLU())
+        self.g_net = nn.Sequential(*layer_list)
 
-        # global features -> embedding g
-        self.global_mlp = nn.Sequential(
-            nn.Linear(global_dim, global_hidden),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(global_hidden, global_hidden),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(global_hidden, global_out),
+        # for token features 1 -> token_hidden_list[-1]
+        layer_list = []
+        for i in range(len(token_hidden_list)-1):
+            layer_list.append(nn.Linear(token_hidden_list[i], token_hidden_list[i+1]))
+            layer_list.append(nn.ReLU())
+        self.v_proj = nn.Sequential(*layer_list)
+        
+        v_out_dim = token_hidden_list[-1]
+        global_out_dim = global_hidden_list[-1]
+        
+        # c_i -> gate scalar in (0,1); learnable but tiny
+        self.c_gate = nn.Sequential(
+            nn.Linear(1, 1),
+            nn.Sigmoid(),
         )
+        # learnable default embedding when gate is "off"
+        self.off_token = nn.Parameter(torch.zeros(v_out_dim))
 
-        # per-bin features: [spectra_i, wss_i] + global embedding
-        self.in_proj = nn.Linear(2 + global_out, conv_channels)
-
-        self.blocks = nn.ModuleList([
-            ResidualConvBlock(conv_channels, kernel_size=kernel_size, dropout=dropout)
-            for _ in range(conv_layers)
-        ])
-
-        # per-bin regression head
-        self.y_head = nn.Conv1d(conv_channels, 1, kernel_size=1)
+        # ---- Head: concat (global_out_dim, v_out_dim) -> out_dim
+        layer_list = [nn.Linear(global_out_dim + v_out_dim, head_hidden_list[0]), nn.ReLU()]
+        for i in range(len(head_hidden_list)-1):
+            layer_list.append(nn.Linear(head_hidden_list[i], head_hidden_list[i+1]))
+            layer_list.append(nn.ReLU())
+        self.head = nn.Sequential(*layer_list)
 
     def forward(self, x):
-        """
-        x: [B, input_dim]
-        layout: [global(4), spectra(95), wss(95)]
-        """
-        B = x.shape[0]
-        g = x[:, :self.global_dim]                              # [B, 4]
-        spectra = x[:, self.global_dim:self.global_dim+self.n_bins]          # [B, 95]
-        wss = x[:, self.global_dim+self.n_bins:self.global_dim+2*self.n_bins] # [B, 95]
 
-        # global embedding
-        g_emb = self.global_mlp(g)                              # [B, global_out]
+        # global
+        g = x[:, :self.global_dim]           # [B,4]
+        g_feat = self.g_net(g)          # [B,global_out_dim]
 
-        # build per-bin sequence
-        x_seq = torch.stack([spectra, wss], dim=-1)              # [B, 95, 2]
-        g_rep = g_emb[:, None, :].expand(B, self.n_bins, g_emb.shape[-1])   # [B, 95, global_out]
-        h = torch.cat([x_seq, g_rep], dim=-1)                    # [B, 95, 2+global_out]
+        # pairs
+        v = (x[:, self.global_dim::2] / 100).unsqueeze(-1)         # [B,N,1]
+        c = x[:, self.global_dim+1::2].unsqueeze(-1)       # [B,N,1] (being either 0 or 1)
 
-        # project -> conv trunk
-        h = self.in_proj(h)                                     # [B, 95, C]
-        h = h.transpose(1, 2).contiguous()                      # [B, C, 95]
+        # print(f"v.shape: {v.shape}, v")
+        # print(f"v: {v}")
+        # print(f"c.shape: {c.shape}, c")
+        # print(f"c: {c}")
+        e_v = self.v_proj(v)                 # [B,N,v_out_dim]
 
-        for blk in self.blocks:
-            h = blk(h)
+        gate = self.c_gate(c)                # [B,N,1]
 
-        y_hat = self.y_head(h).squeeze(1)                       # [B, 95]
-        return y_hat
+        off = self.off_token.view(1, 1, -1)  # [1,1,v_out_dim]
+
+        # gated token: when c≈0, use off_token; when c≈1, use transformed v (+ shift)
+        tokens = e_v * gate + off * (1.0 - gate)  # [B,N,v_out_dim]
+
+        z = torch.cat([g_feat.unsqueeze(1).repeat(1, tokens.shape[1], 1), tokens], dim=-1)  # [B, N, global_out_dim+v_out_dim]
+        y = self.head(z)                         # [B,N,1]
+
+        return y.squeeze(-1)
