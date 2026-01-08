@@ -1,8 +1,10 @@
 # Model files
+model/
 model/*.pt
 model/*.pth
 
 # Submission files
+submission/
 submission/*.csv
 
 # Python cache
@@ -30,4 +32,4 @@ Thumbs.db
 *.log
 
 # Figures (optional - uncomment if you don't want to track figures)
-# figures/
+figures/

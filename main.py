@@ -213,7 +213,7 @@ if __name__ == "__main__":
     n_train = n_total - n_val
     train_dataset, val_dataset = random_split(dataset, [n_train, n_val], generator=torch.Generator().manual_seed(256))
 
-    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, drop_last=True)
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, drop_last=False)
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, drop_last=False)
 
     # --- Model create/train ---
@@ -264,6 +264,7 @@ if __name__ == "__main__":
             optimizer.step()
             running_loss += loss.item() * loaded_size
             total_size += loaded_size
+        # print(f"Total size: {total_size}")
         train_losses.append(running_loss / total_size)
         
         # Validate
