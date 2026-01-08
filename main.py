@@ -16,8 +16,7 @@ import copy
 from utils.models import *
 # Set seeds
 print("PyTorch version:", torch.__version__)
-torch.manual_seed(256)
-np.random.seed(256)
+
 
 
 
