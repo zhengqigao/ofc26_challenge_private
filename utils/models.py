@@ -24,6 +24,28 @@ class BasicFNN(nn.Module):
         x[:,4::2] = x[:,4::2] / 100 # normalization 
         return self.layers(x)
 
+class ComplicatedFNN(nn.Module):
+    def __init__(self, input_dim, output_dim):
+        super().__init__()
+        self.layers = nn.Sequential(
+            nn.Linear(input_dim, 256),
+            nn.SiLU(),
+            nn.Linear(256, 256),
+            nn.SiLU(),
+            nn.Linear(256, 256),
+            nn.SiLU(),
+            nn.Linear(256, 128),
+            nn.SiLU(),
+            nn.Linear(128, 64),
+            nn.SiLU(),
+            nn.Linear(64, 32),
+            nn.SiLU(),
+            nn.Linear(32, output_dim),
+        )
+        
+    def forward(self, x):
+        x[:,4::2] = x[:,4::2] / 100 # normalization 
+        return self.layers(x)
 
 class GatedBasicFNN(nn.Module):
     def __init__(self, input_dim = 95, output_dim = 95):

@@ -238,6 +238,8 @@ if __name__ == "__main__":
         base_model = HybridFNN(X_tensor.shape[1], Numchannels).to(device)
     elif args.nn_type == "DeepResidualFNN":
         base_model = DeepResidualFNN(X_tensor.shape[1], Numchannels).to(device)
+    elif args.nn_type == "ComplicatedFNN":
+        base_model = ComplicatedFNN(X_tensor.shape[1], Numchannels).to(device)
     else:
         available_models = ["BasicFNN", "LinearGateNet", "GatedBasicFNN", "ResidualFNN", 
                            "AttentionFNN", "ChannelWiseFNN", "LightweightFNN", "HybridFNN", "DeepResidualFNN"]
