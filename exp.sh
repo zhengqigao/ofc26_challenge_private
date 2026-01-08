@@ -2,7 +2,7 @@
 
 LR=0.01
 EPOCHS=5000
-BATCH_SIZE=32
+BATCH_SIZE=128
 SAVE_BEST="--save_best"
 
 run_model=$1 # can be BasicFNN, LinearGateNet, GatedBasicFNN, ResidualFNN, AttentionFNN, ChannelWiseFNN, LightweightFNN, HybridFNN, DeepResidualFNN
