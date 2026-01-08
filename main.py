@@ -17,7 +17,7 @@ tf.random.set_seed(256)
 
 FILE_PREFIX = './data/'
 
-
+#%%
 # Full paths to training data
 TRAIN_FEATURE_PATH = f"{FILE_PREFIX}/train_features.txt"
 TRAIN_LABEL_PATH   = f"{FILE_PREFIX}/train_labels.txt"
@@ -26,8 +26,8 @@ TRAIN_LABEL_PATH   = f"{FILE_PREFIX}/train_labels.txt"
 TEST_FEATURE_PATH = f"{FILE_PREFIX}/test_features.txt"
 
 # Output folders
-figure_prepath = "../figures/"
-model_prepath = "../model/"
+figure_prepath = f"{FILE_PREFIX}/figures/"
+model_prepath = f"{FILE_PREFIX}/model/"
 
 # Create output folders if not existed
 os.makedirs(figure_prepath, exist_ok=True)
@@ -256,7 +256,7 @@ kaggle_ID = X_test_full.columns[0]
 y_pred.insert(0, kaggle_ID, X_test_full[kaggle_ID].values)
 
 # Save predictions
-output_path = "../Features/Test/example_submission.csv"
+output_path = f"{FILE_PREFIX}/submission/my_submission.csv"
 y_pred.to_csv(output_path, index=False)
 
 
