@@ -185,7 +185,7 @@ if __name__ == "__main__":
     parser.add_argument("--nn_type", type=str, default="BasicFNN")
     parser.add_argument("--plot_loss", action="store_true", default=False)
     parser.add_argument("--save_best", action="store_true", default=False) # default save the model after the last epoch, if save_best is True, save the model when the validation loss is the best
-
+    parser.add_argument("--weight_decay", type=float, default=0.01)
     args = parser.parse_args()
     
     X_train = pd.read_csv(TRAIN_FEATURE_PATH).iloc[:, 3:]
@@ -243,7 +243,7 @@ if __name__ == "__main__":
                            "AttentionFNN", "ChannelWiseFNN", "LightweightFNN", "HybridFNN", "DeepResidualFNN"]
         raise ValueError(f"Invalid nn_type: {args.nn_type}. Available: {', '.join(available_models)}")
 
-    optimizer = optim.Adam(base_model.parameters(), lr=args.lr)
+    optimizer = optim.AdamW(base_model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
     train_losses = []
     val_losses = []
