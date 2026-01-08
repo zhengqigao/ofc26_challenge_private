@@ -19,12 +19,67 @@ class BasicFNN(nn.Module):
             nn.ReLU(),
             nn.Linear(128, 64),
             nn.ReLU(),
-            nn.Linear(64, output_dim),
+            nn.Linear(64, 16),
+            nn.ReLU(),
+            nn.Linear(16, output_dim),
         )
         
     def forward(self, x):
         x[:,4::2] = x[:,4::2] / 100 # normalization 
         return self.layers(x)
+
+
+class GatedBasicFNN(nn.Module):
+    def __init__(self, input_dim = 95, output_dim = 95):
+        super().__init__()
+        self.layers = nn.Sequential(
+            nn.Linear(128, 256),
+            nn.ReLU(),
+            nn.Linear(256, 512),
+            nn.ReLU(),
+            nn.Linear(512, 256),
+            nn.ReLU(),
+            nn.Linear(256, 128),
+            nn.ReLU(),
+            nn.Linear(128, 128),
+            nn.ReLU(),
+            nn.Linear(128, 64),
+            nn.ReLU(),
+            nn.Linear(64, 16),
+            nn.ReLU(),
+            nn.Linear(16, output_dim),
+        )
+        
+        self.gate = nn.Sequential(
+            nn.Linear(input_dim, 128),
+            nn.ReLU(),
+            nn.Linear(128, 128),
+            nn.ReLU(),
+            nn.Linear(128, 128),
+            nn.ReLU(),
+            nn.Linear(128, 128),
+        )
+        
+        self.proj = nn.Sequential(
+            nn.Linear(99, 128),
+            nn.ReLU(),
+            nn.Linear(128, 128),
+            nn.ReLU(),
+            nn.Linear(128, 128),
+            nn.ReLU(),
+            nn.Linear(128, 128),
+        )
+        
+    def forward(self, x):
+        x[:,4::2] = x[:,4::2] / 100 # normalization
+        v = torch.cat([x[:,0:4], x[:,4::2]], dim=-1) # shape [batch, 99]
+        c = x[:,5::2] # control variable, shape [batch, 95]
+        g = self.gate(c) # shape [batch, 128]
+        v = self.proj(v) # shape [batch, 128]
+        o = v + g
+        result = self.layers(o) # shape [batch, 1]
+        return result
+
 
 class CustomFNN(nn.Module):
     def __init__(self, input_dim, output_dim):
@@ -122,3 +177,326 @@ class LinearGateNet(nn.Module):
         y = self.head(z)                         # [B,N,1]
 
         return y.squeeze(-1)
+
+
+class ResidualFNN(nn.Module):
+    """
+    带残差连接的全连接网络，训练更稳定
+    使用BatchNorm和Dropout防止过拟合
+    """
+    def __init__(self, input_dim, output_dim, hidden_dims=[256, 512, 256, 128, 64], dropout=0.2):
+        super().__init__()
+        self.input_dim = input_dim
+        self.output_dim = output_dim
+        
+        # 输入层
+        self.input_layer = nn.Sequential(
+            nn.Linear(input_dim, hidden_dims[0]),
+            nn.BatchNorm1d(hidden_dims[0]),
+            nn.ReLU(),
+            nn.Dropout(dropout)
+        )
+        
+        # 残差块
+        self.blocks = nn.ModuleList()
+        for i in range(len(hidden_dims) - 1):
+            if hidden_dims[i] == hidden_dims[i+1]:
+                # 相同维度，使用残差连接
+                self.blocks.append(nn.Sequential(
+                    nn.Linear(hidden_dims[i], hidden_dims[i]),
+                    nn.BatchNorm1d(hidden_dims[i]),
+                    nn.ReLU(),
+                    nn.Dropout(dropout),
+                    nn.Linear(hidden_dims[i], hidden_dims[i]),
+                    nn.BatchNorm1d(hidden_dims[i]),
+                ))
+            else:
+                # 不同维度，普通层
+                self.blocks.append(nn.Sequential(
+                    nn.Linear(hidden_dims[i], hidden_dims[i+1]),
+                    nn.BatchNorm1d(hidden_dims[i+1]),
+                    nn.ReLU(),
+                    nn.Dropout(dropout)
+                ))
+        
+        # 输出层
+        self.output_layer = nn.Sequential(
+            nn.Linear(hidden_dims[-1], 32),
+            nn.ReLU(),
+            nn.Linear(32, output_dim)
+        )
+        
+    def forward(self, x):
+        x[:, 4::2] = x[:, 4::2] / 100  # normalization
+        x = self.input_layer(x)
+        
+        for i, block in enumerate(self.blocks):
+            if len(block) == 6:  # 残差块
+                residual = x
+                x = block(x)
+                x = x + residual
+                x = nn.functional.relu(x)
+            else:  # 普通层
+                x = block(x)
+        
+        return self.output_layer(x)
+
+
+class AttentionFNN(nn.Module):
+    """
+    使用自注意力机制捕捉通道间关系的模型
+    适合捕捉相邻通道的空间相关性
+    """
+    def __init__(self, input_dim, output_dim, embed_dim=128, num_heads=8, num_layers=2, dropout=0.1):
+        super().__init__()
+        self.global_dim = 4
+        self.n_channels = 95
+        
+        # 全局特征处理
+        self.global_net = nn.Sequential(
+            nn.Linear(self.global_dim, 64),
+            nn.ReLU(),
+            nn.Linear(64, embed_dim)
+        )
+        
+        # 通道特征处理（光谱值 + WSS）
+        self.channel_proj = nn.Sequential(
+            nn.Linear(2, embed_dim),  # [spectra, wss] -> embed_dim
+            nn.LayerNorm(embed_dim)
+        )
+        
+        # 自注意力层
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=embed_dim,
+            nhead=num_heads,
+            dim_feedforward=embed_dim * 2,
+            dropout=dropout,
+            batch_first=True
+        )
+        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+        
+        # 输出头
+        self.output_head = nn.Sequential(
+            nn.Linear(embed_dim, 64),
+            nn.ReLU(),
+            nn.Linear(64, 1)
+        )
+        
+    def forward(self, x):
+        x[:, 4::2] = x[:, 4::2] / 100  # normalization
+        
+        # 分离全局和通道特征
+        global_feat = x[:, :self.global_dim]  # [B, 4]
+        spectra = x[:, 4::2]  # [B, 95]
+        wss = x[:, 5::2]  # [B, 95]
+        
+        # 全局特征嵌入
+        g_emb = self.global_net(global_feat)  # [B, embed_dim]
+        
+        # 通道特征
+        channel_feat = torch.stack([spectra, wss], dim=-1)  # [B, 95, 2]
+        channel_emb = self.channel_proj(channel_feat)  # [B, 95, embed_dim]
+        
+        # 添加全局特征到每个通道
+        g_emb_expanded = g_emb.unsqueeze(1).expand(-1, self.n_channels, -1)  # [B, 95, embed_dim]
+        x_seq = channel_emb + g_emb_expanded  # [B, 95, embed_dim]
+        
+        # 自注意力
+        x_attn = self.transformer(x_seq)  # [B, 95, embed_dim]
+        
+        # 输出
+        output = self.output_head(x_attn).squeeze(-1)  # [B, 95]
+        return output
+
+
+class ChannelWiseFNN(nn.Module):
+    """
+    对每个通道独立处理，然后融合的模型
+    适合处理通道间的独立性
+    """
+    def __init__(self, input_dim, output_dim, channel_hidden=32, global_hidden=64):
+        super().__init__()
+        self.global_dim = 4
+        self.n_channels = 95
+        
+        # 全局特征处理
+        self.global_net = nn.Sequential(
+            nn.Linear(self.global_dim, global_hidden),
+            nn.ReLU(),
+            nn.Linear(global_hidden, global_hidden)
+        )
+        
+        # 每个通道的独立处理网络（共享权重）
+        self.channel_net = nn.Sequential(
+            nn.Linear(2, channel_hidden),  # [spectra, wss]
+            nn.ReLU(),
+            nn.Linear(channel_hidden, channel_hidden),
+            nn.ReLU(),
+            nn.Linear(channel_hidden, channel_hidden)
+        )
+        
+        # 融合层：全局 + 通道特征 -> 输出
+        self.fusion_net = nn.Sequential(
+            nn.Linear(global_hidden + channel_hidden, 64),
+            nn.ReLU(),
+            nn.Linear(64, 32),
+            nn.ReLU(),
+            nn.Linear(32, 1)
+        )
+        
+    def forward(self, x):
+        x[:, 4::2] = x[:, 4::2] / 100  # normalization
+        
+        # 全局特征
+        global_feat = x[:, :self.global_dim]  # [B, 4]
+        g_emb = self.global_net(global_feat)  # [B, global_hidden]
+        
+        # 通道特征
+        spectra = x[:, 4::2]  # [B, 95]
+        wss = x[:, 5::2]  # [B, 95]
+        channel_feat = torch.stack([spectra, wss], dim=-1)  # [B, 95, 2]
+        
+        # 对每个通道独立处理
+        channel_emb = self.channel_net(channel_feat)  # [B, 95, channel_hidden]
+        
+        # 融合全局和通道特征
+        g_emb_expanded = g_emb.unsqueeze(1).expand(-1, self.n_channels, -1)  # [B, 95, global_hidden]
+        fused = torch.cat([g_emb_expanded, channel_emb], dim=-1)  # [B, 95, global_hidden + channel_hidden]
+        
+        # 输出
+        output = self.fusion_net(fused).squeeze(-1)  # [B, 95]
+        return output
+
+
+class LightweightFNN(nn.Module):
+    """
+    轻量级模型，参数量少但有效
+    适合小数据集，减少过拟合风险
+    """
+    def __init__(self, input_dim, output_dim):
+        super().__init__()
+        self.layers = nn.Sequential(
+            nn.Linear(input_dim, 128),
+            nn.BatchNorm1d(128),
+            nn.ReLU(),
+            nn.Dropout(0.2),
+            nn.Linear(128, 128),
+            nn.BatchNorm1d(128),
+            nn.ReLU(),
+            nn.Dropout(0.2),
+            nn.Linear(128, 64),
+            nn.BatchNorm1d(64),
+            nn.ReLU(),
+            nn.Dropout(0.1),
+            nn.Linear(64, output_dim),
+        )
+        
+    def forward(self, x):
+        x[:, 4::2] = x[:, 4::2] / 100  # normalization
+        return self.layers(x)
+
+
+class HybridFNN(nn.Module):
+    """
+    混合模型：结合全局MLP和通道级处理
+    先处理全局特征，再对每个通道独立预测
+    """
+    def __init__(self, input_dim, output_dim, global_hidden=128, channel_hidden=32):
+        super().__init__()
+        self.global_dim = 4
+        self.n_channels = 95
+        
+        # 全局特征处理（影响所有通道）
+        self.global_net = nn.Sequential(
+            nn.Linear(self.global_dim, global_hidden),
+            nn.ReLU(),
+            nn.Linear(global_hidden, global_hidden),
+            nn.ReLU(),
+            nn.Linear(global_hidden, global_hidden)
+        )
+        
+        # 通道特征投影
+        self.channel_proj = nn.Sequential(
+            nn.Linear(2, channel_hidden),  # [spectra, wss]
+            nn.ReLU(),
+            nn.Linear(channel_hidden, channel_hidden)
+        )
+        
+        # 融合并输出
+        self.output_net = nn.ModuleList([
+            nn.Sequential(
+                nn.Linear(global_hidden + channel_hidden, 32),
+                nn.ReLU(),
+                nn.Linear(32, 1)
+            ) for _ in range(self.n_channels)
+        ])
+        
+    def forward(self, x):
+        x[:, 4::2] = x[:, 4::2] / 100  # normalization
+        
+        # 全局特征
+        global_feat = x[:, :self.global_dim]  # [B, 4]
+        g_emb = self.global_net(global_feat)  # [B, global_hidden]
+        
+        # 通道特征
+        spectra = x[:, 4::2]  # [B, 95]
+        wss = x[:, 5::2]  # [B, 95]
+        channel_feat = torch.stack([spectra, wss], dim=-1)  # [B, 95, 2]
+        c_emb = self.channel_proj(channel_feat)  # [B, 95, channel_hidden]
+        
+        # 对每个通道独立预测
+        outputs = []
+        for i in range(self.n_channels):
+            fused = torch.cat([g_emb, c_emb[:, i, :]], dim=-1)  # [B, global_hidden + channel_hidden]
+            out = self.output_net[i](fused)  # [B, 1]
+            outputs.append(out)
+        
+        return torch.cat(outputs, dim=-1)  # [B, 95]
+
+
+class DeepResidualFNN(nn.Module):
+    """
+    深度残差网络，使用多个残差块
+    适合复杂模式的学习
+    """
+    def __init__(self, input_dim, output_dim, base_dim=128, num_blocks=4, dropout=0.2):
+        super().__init__()
+        
+        # 输入投影
+        self.input_proj = nn.Sequential(
+            nn.Linear(input_dim, base_dim),
+            nn.BatchNorm1d(base_dim),
+            nn.ReLU()
+        )
+        
+        # 残差块
+        self.blocks = nn.ModuleList()
+        for _ in range(num_blocks):
+            self.blocks.append(nn.Sequential(
+                nn.Linear(base_dim, base_dim),
+                nn.BatchNorm1d(base_dim),
+                nn.ReLU(),
+                nn.Dropout(dropout),
+                nn.Linear(base_dim, base_dim),
+                nn.BatchNorm1d(base_dim),
+            ))
+        
+        # 输出层
+        self.output_layer = nn.Sequential(
+            nn.Linear(base_dim, base_dim // 2),
+            nn.ReLU(),
+            nn.Linear(base_dim // 2, output_dim)
+        )
+        
+    def forward(self, x):
+        x[:, 4::2] = x[:, 4::2] / 100  # normalization
+        x = self.input_proj(x)
+        
+        # 残差连接
+        for block in self.blocks:
+            residual = x
+            x = block(x)
+            x = x + residual
+            x = nn.functional.relu(x)
+        
+        return self.output_layer(x)

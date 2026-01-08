@@ -23,11 +23,11 @@ np.random.seed(256)
 
 #%%
 # Full paths to training data
-TRAIN_FEATURE_PATH = f"./data/archive/train_features.csv"
-TRAIN_LABEL_PATH   = f"./data/archive/train_labels.csv"
+TRAIN_FEATURE_PATH = f"./data/train_features.csv"
+TRAIN_LABEL_PATH   = f"./data/train_labels.csv"
 
 # Full path to test data
-TEST_FEATURE_PATH = f"./data/test_features.txt"
+TEST_FEATURE_PATH = f"./data/test_features.csv"
 
 # Output folders
 figure_prepath = f"./figures/"
@@ -100,7 +100,6 @@ def plot_loss(indx,train_losses,val_losses,ingnoreIndex):
     plt.ylabel('Error [gain]')
     plt.legend()
     plt.grid(True)
-    plt.show()
 
 # def figure_comp(figIndx,y_test_result,y_pred_result,filename,setFrontSize):
 #     plt.figure(figIndx)
@@ -183,6 +182,7 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--save_model_name", type=str, default="model.pt")
     parser.add_argument("--nn_type", type=str, default="BasicFNN")
+    
     parser.add_argument("--save_best", action="store_true", default=False) # default save the model after the last epoch, if save_best is True, save the model when the validation loss is the best
 
     args = parser.parse_args()
@@ -222,8 +222,24 @@ if __name__ == "__main__":
         base_model = BasicFNN(X_tensor.shape[1], Numchannels).to(device)
     elif args.nn_type == "LinearGateNet":
         base_model = LinearGateNet().to(device)
+    elif args.nn_type == "GatedBasicFNN":
+        base_model = GatedBasicFNN().to(device)
+    elif args.nn_type == "ResidualFNN":
+        base_model = ResidualFNN(X_tensor.shape[1], Numchannels).to(device)
+    elif args.nn_type == "AttentionFNN":
+        base_model = AttentionFNN(X_tensor.shape[1], Numchannels).to(device)
+    elif args.nn_type == "ChannelWiseFNN":
+        base_model = ChannelWiseFNN(X_tensor.shape[1], Numchannels).to(device)
+    elif args.nn_type == "LightweightFNN":
+        base_model = LightweightFNN(X_tensor.shape[1], Numchannels).to(device)
+    elif args.nn_type == "HybridFNN":
+        base_model = HybridFNN(X_tensor.shape[1], Numchannels).to(device)
+    elif args.nn_type == "DeepResidualFNN":
+        base_model = DeepResidualFNN(X_tensor.shape[1], Numchannels).to(device)
     else:
-        raise ValueError(f"Invalid nn_type: {args.nn_type}")
+        available_models = ["BasicFNN", "LinearGateNet", "GatedBasicFNN", "ResidualFNN", 
+                           "AttentionFNN", "ChannelWiseFNN", "LightweightFNN", "HybridFNN", "DeepResidualFNN"]
+        raise ValueError(f"Invalid nn_type: {args.nn_type}. Available: {', '.join(available_models)}")
 
     optimizer = optim.Adam(base_model.parameters(), lr=args.lr)
 
@@ -260,8 +276,8 @@ if __name__ == "__main__":
                 val_loss += loss.item()
                 n_batches_val += 1
         val_losses.append(val_loss / n_batches_val)
-        
-        print(f"Epoch {epoch+1}/{args.epochs}: TrainLoss={train_losses[-1]:.5f}  ValLoss={val_losses[-1]:.5f}")
+        if epoch % 100 == 0:
+            print(f"Epoch {epoch+1}/{args.epochs}: TrainLoss={train_losses[-1]:.5f}  ValLoss={val_losses[-1]:.5f}")
         if args.save_best:
             if val_losses[-1] < best_val_loss:
                 best_val_loss = val_losses[-1]
@@ -269,9 +285,9 @@ if __name__ == "__main__":
 
     if not args.save_best:    
         best_model = base_model # point to the model after the last epoch
-        print(f"Saving model after the last epoch")
+        print(f"Saving {args.nn_type} model after the last epoch")
     else:
-        print(f"Saving model when the validation loss is the best (val_loss={best_val_loss:.5f})")
+        print(f"Saving {args.nn_type} model when the validation loss is the best (val_loss={best_val_loss:.5f})")
     
     torch.save(best_model, TrainModelName)
     
@@ -313,6 +329,6 @@ if __name__ == "__main__":
     y_pred.insert(0, kaggle_ID, X_test_full[kaggle_ID].values)
 
     # Save predictions
-    output_path = f"./submission/my_submission.csv"
+    output_path = f"./submission/my_submission_{args.nn_type}.csv"
     y_pred.to_csv(output_path, index=False)
 
