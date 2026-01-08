@@ -341,4 +341,5 @@ if __name__ == "__main__":
     # Save predictions
     output_path = f"./submission/my_submission_{args.nn_type}.csv"
     y_pred.to_csv(output_path, index=False)
+    print(f"Saved predictions to {output_path}")
 
