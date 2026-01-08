@@ -88,7 +88,7 @@ def custom_loss_L2_pytorch(y_pred, y_actual):
     loaded_size = (y_actual != 0).sum().float()
     # avoid division by zero
     loss = torch.sqrt(error.sum() / (loaded_size + 1e-8))
-    return loss
+    return loss, loaded_size
 
 
 
@@ -248,35 +248,37 @@ if __name__ == "__main__":
     val_losses = []
     best_val_loss = float('inf')
     best_model = None
+    
     for epoch in range(args.epochs):
         # Train
         base_model.train()
         running_loss = 0.0
-        n_batches = 0
+        total_size = 0
         for xb, yb in train_loader:
             xb = xb.to(device)
             yb = yb.to(device)
             optimizer.zero_grad()
             pred = base_model(xb)
-            loss = custom_loss_L2_pytorch(pred, yb)
+            loss, loaded_size = custom_loss_L2_pytorch(pred, yb)
             loss.backward()
             optimizer.step()
-            running_loss += loss.item()
-            n_batches += 1
-        train_losses.append(running_loss / n_batches)
+            running_loss += loss.item() * loaded_size
+            total_size += loaded_size
+        train_losses.append(running_loss / total_size)
+        
         # Validate
         base_model.eval()
         val_loss = 0.0
-        n_batches_val = 0
+        total_size = 0
         with torch.no_grad():
             for xb, yb in val_loader:
                 xb = xb.to(device)
                 yb = yb.to(device)
                 pred = base_model(xb)
-                loss = custom_loss_L2_pytorch(pred, yb)
-                val_loss += loss.item()
-                n_batches_val += 1
-        val_losses.append(val_loss / n_batches_val)
+                loss, loaded_size = custom_loss_L2_pytorch(pred, yb)
+                val_loss += loss.item() * loaded_size
+                total_size += loaded_size
+        val_losses.append(val_loss / total_size)
         if epoch % 100 == 0:
             print(f"Epoch {epoch+1}/{args.epochs}: TrainLoss={train_losses[-1]:.5f}  ValLoss={val_losses[-1]:.5f}")
         if args.save_best:
