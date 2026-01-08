@@ -100,6 +100,7 @@ def plot_loss(indx,train_losses,val_losses,ingnoreIndex):
     plt.ylabel('Error [gain]')
     plt.legend()
     plt.grid(True)
+    plt.show()
 
 # def figure_comp(figIndx,y_test_result,y_pred_result,filename,setFrontSize):
 #     plt.figure(figIndx)

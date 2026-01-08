@@ -17,11 +17,7 @@ class BasicFNN(nn.Module):
             nn.ReLU(),
             nn.Linear(128, 128),
             nn.ReLU(),
-            nn.Linear(128, 64),
-            nn.ReLU(),
-            nn.Linear(64, 16),
-            nn.ReLU(),
-            nn.Linear(16, output_dim),
+            nn.Linear(128, output_dim),
         )
         
     def forward(self, x):
