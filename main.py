@@ -2,18 +2,21 @@
 # libraries
 import matplotlib.pyplot as plt
 import pandas as pd
-import tensorflow as tf
-from tensorflow import keras
-from tensorflow.keras import layers
 import numpy as np
-from tensorflow import math as TFmath
 import math,os,shutil
 from prettytable import PrettyTable
 import scipy.stats as stats
 from sklearn.model_selection import train_test_split
 
-print("TensorFlow version:", tf.__version__)
-tf.random.set_seed(256)
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import TensorDataset, DataLoader, random_split
+
+# Set seeds
+print("PyTorch version:", torch.__version__)
+torch.manual_seed(256)
+np.random.seed(256)
 
 FILE_PREFIX = './data/'
 
@@ -74,48 +77,42 @@ def divideZero(numerator,denominator):
   return result
 
 # %%
-### train and loss function
-def custom_loss(y_actual,y_pred):
-  # calculate the loaded channel numbers for each batch
-  # batch default is [batch size=32, outputchannel number]
-  loaded_size = tf.dtypes.cast(TFmath.count_nonzero(y_actual), tf.float32)
-  # turn unloaded y_pred prediction to zero
-  y_pred_cast_unloaded_to_zero = TFmath.divide_no_nan(TFmath.multiply(y_pred,y_actual),y_actual)
-  # error [unloaded,unloaded,loaded,loaded]: y_pred = [13->0,15->0,18.5,18.3], y_actual = [0,0,18.2,18.2]
-  error = TFmath.abs(TFmath.subtract(y_pred_cast_unloaded_to_zero,y_actual))
-  # custom_loss = (0.3+0.2) / 2
-  custom_loss = TFmath.divide(TFmath.reduce_sum(error),loaded_size)
-  return custom_loss
-
-def custom_loss_L2(y_actual,y_pred):
-  loaded_size = tf.dtypes.cast(TFmath.count_nonzero(y_actual), tf.float32)
-  y_pred_cast_unloaded_to_zero = TFmath.divide_no_nan(TFmath.multiply(y_pred,y_actual),y_actual)
-  error = TFmath.square(TFmath.subtract(y_pred_cast_unloaded_to_zero,y_actual))
-  custom_loss = TFmath.sqrt(TFmath.divide(TFmath.reduce_sum(error),loaded_size))
-  return custom_loss
-    
+### PyTorch Loss
+def custom_loss_L2_pytorch(y_pred, y_actual):
+    # y_pred, y_actual shape: [batch, channels]
+    # turn unloaded y_pred prediction to zero
+    # For each value, if actual==0, pred->0; else pred unchanged
+    y_pred_cast_unloaded_to_zero = torch.where(y_actual != 0, y_pred, torch.zeros_like(y_pred))
+    error = (y_pred_cast_unloaded_to_zero - y_actual) ** 2
+    loaded_size = (y_actual != 0).sum().float()
+    # avoid division by zero
+    loss = torch.sqrt(error.sum() / (loaded_size + 1e-8))
+    return loss
 
 # %%
-def designed_DNN_model(outputNum):
-  model = keras.Sequential([
-      # normalizationLayer,
-      layers.Dense(num_inputFeatures, activation='relu'),
-      layers.Dense(256, activation='relu'),
-      layers.Dense(128, activation='relu'),
-      layers.Dense(128, activation='relu'),
-      layers.Dense(128, activation='relu'),
-      layers.Dense(outputNum),
-  ])
+class DesignedDNNModel(nn.Module):
+    def __init__(self, input_dim, output_dim):
+        super().__init__()
+        self.layers = nn.Sequential(
+            nn.Linear(input_dim, input_dim),  # mimic first Dense from tf
+            nn.ReLU(),
+            nn.Linear(input_dim, 256),
+            nn.ReLU(),
+            nn.Linear(256, 128),
+            nn.ReLU(),
+            nn.Linear(128, 128),
+            nn.ReLU(),
+            nn.Linear(128, 128),
+            nn.ReLU(),
+            nn.Linear(128, output_dim),
+        )
+    def forward(self, x):
+        return self.layers(x)
 
-  model.compile(loss=custom_loss_L2, # custom_loss
-                optimizer=tf.keras.optimizers.Adam(0.01))
-  return model
-
-### debug function after train -> go to csv
-def plot_loss(indx,history,ingnoreIndex):
+def plot_loss(indx,train_losses,val_losses,ingnoreIndex):
     plt.figure(indx)
-    plt.plot(history.history['loss'][ingnoreIndex:], label='loss')
-    plt.plot(history.history['val_loss'][ingnoreIndex:], label='val_loss')
+    plt.plot(train_losses[ingnoreIndex:], label='loss')
+    plt.plot(val_losses[ingnoreIndex:], label='val_loss')
     plt.xlabel('Epoch')
     plt.ylabel('Error [gain]')
     plt.legend()
@@ -129,8 +126,6 @@ def figure_comp(figIndx,y_test_result,y_pred_result,filename,setFrontSize):
     plt.ylabel('predicted EDFA Gain (dB)', fontsize=setFrontSize)
     minAxis = math.floor(min(y_test_result.min(),y_pred_result.min()) - 0.5)
     maxAxis = math.ceil (max(y_test_result.max(),y_pred_result.max()) + 0.5)
-    # print(min(y_test_result.min(),y_pred_result.min()),max(y_test_result.max(),y_pred_result.max()))
-    # print(minAxis,maxAxis)
     limss = [*np.arange(minAxis,maxAxis+1,1)]
     lims = [limss[0],limss[-1]]
     plt.xlim(lims)
@@ -175,14 +170,6 @@ def plot_per_channel_error(y_pred,y_test):
         error_min_0_2s.append(error_min_0_2)
         within95ranges.append(within95range)
         mses.append(mse)
-    # plt.figure(100)
-    # plt.plot(error_min_0_1s)
-    # plt.figure(101)
-    # plt.plot(error_min_0_2s)
-    # plt.figure(102)
-    # plt.plot(within95ranges)
-    # plt.figure(104)
-    # plt.plot(error_means)
     plt.figure(103)
     plt.plot(mses)
     plt.xlabel('Channel indices')
@@ -192,11 +179,8 @@ def plot_per_channel_error(y_pred,y_test):
 def getErrorInfo(error):
     error_reasonable = [i for i in error if abs(i)<=0.2]
     error_measureError = [i for i in error if abs(i)<=0.1]
-    # error_95 = [i for i in error if abs(i)<=0.25]
     error_min_0_1 = len(error_measureError)/len(error)
     error_min_0_2 = len(error_reasonable)/len(error)
-    # error_min_0_25= len(error_95)/len(error)
-    # error_max_0_2 = 1-len(error_reasonable)/len(error)
     error_sorted = np.sort(abs(error))
     within95range = error_sorted[int(0.95*len(error))]
     mse = (np.square(error)).mean(axis=None)
@@ -212,44 +196,98 @@ y_train = pd.read_csv(TRAIN_LABEL_PATH)
 
 y_train.fillna(0, inplace=True)
 
-TrainModelName = model_prepath+"/ML_example_model.h5"
+TrainModelName = model_prepath+"/ML_example_model.pt"
 
-# train model
-base_model = designed_DNN_model(Numchannels)
+# --- Torch: Prepare Data ---
+X_np = X_train.values.astype(np.float32)
+y_np = y_train.values.astype(np.float32)
 
-history_dnn = base_model.fit(
-    X_train,
-    y_train,
-    validation_split=0.2,
-    verbose=2, epochs=500)
-base_model.save(TrainModelName)
+X_tensor = torch.from_numpy(X_np)
+y_tensor = torch.from_numpy(y_np)
 
+# Create TensorDataset
+dataset = TensorDataset(X_tensor, y_tensor)
+
+# Split into train and val (as keras validation_split=0.2)
+n_total = len(dataset)
+n_val = int(0.2 * n_total)
+n_train = n_total - n_val
+train_dataset, val_dataset = random_split(dataset, [n_train, n_val], generator=torch.Generator().manual_seed(256))
+
+batch_size = 32
+train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, drop_last=True)
+val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, drop_last=False)
+
+# --- Model create/train ---
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+base_model = DesignedDNNModel(X_tensor.shape[1], Numchannels).to(device)
+
+optimizer = optim.Adam(base_model.parameters(), lr=0.01)
+
+num_epochs = 500
+train_losses = []
+val_losses = []
+for epoch in range(num_epochs):
+    # Train
+    base_model.train()
+    running_loss = 0.0
+    n_batches = 0
+    for xb, yb in train_loader:
+        xb = xb.to(device)
+        yb = yb.to(device)
+        optimizer.zero_grad()
+        pred = base_model(xb)
+        loss = custom_loss_L2_pytorch(pred, yb)
+        loss.backward()
+        optimizer.step()
+        running_loss += loss.item()
+        n_batches += 1
+    train_losses.append(running_loss / n_batches)
+    # Validate
+    base_model.eval()
+    val_loss = 0.0
+    n_batches_val = 0
+    with torch.no_grad():
+        for xb, yb in val_loader:
+            xb = xb.to(device)
+            yb = yb.to(device)
+            pred = base_model(xb)
+            loss = custom_loss_L2_pytorch(pred, yb)
+            val_loss += loss.item()
+            n_batches_val += 1
+    val_losses.append(val_loss / n_batches_val)
+    if (epoch+1) % 50 == 0:
+        print(f"Epoch {epoch+1}/{num_epochs}: TrainLoss={train_losses[-1]:.5f}  ValLoss={val_losses[-1]:.5f}")
+
+# Save model state
+torch.save(base_model.state_dict(), TrainModelName)
 
 # %%
-plot_loss(1, history_dnn, 15)
+plot_loss(1, train_losses, val_losses, 15)
 
 # %%
 X_test_full = pd.read_csv(TEST_FEATURE_PATH)
 X_test = X_test_full.iloc[:, 5:]
 
 # Predict on test set
-y_pred_array = base_model.predict(X_test)
+base_model.eval()
+X_test_np = X_test.values.astype(np.float32)
+X_test_tensor = torch.from_numpy(X_test_np).to(device)
+with torch.no_grad():
+    y_pred_tensor = base_model(X_test_tensor)
+    y_pred_array = y_pred_tensor.cpu().numpy()
 
 # Convert prediction to DataFrame
 y_pred = pd.DataFrame(y_pred_array, columns=y_train.columns)
 
 wss_cols = [col for col in X_test.columns if 'dut_wss_activated_channel_index' in col.lower()]
-# wss_cols_sorted = sorted(wss_cols)
-
 label_cols = [col for col in y_train.columns if 'calculated_gain_spectra' in col.lower()]
-# label_cols_sorted = sorted(label_cols)
 
-# Save to CSV
+# Save to CSV (mask same as before)
 mask = X_test[wss_cols].values == 1
 y_pred = pd.DataFrame(np.where(mask, y_pred.values, np.nan),
     columns=label_cols
 )
-
 y_pred.fillna(0, inplace=True)
 
 kaggle_ID = X_test_full.columns[0]
@@ -258,5 +296,4 @@ y_pred.insert(0, kaggle_ID, X_test_full[kaggle_ID].values)
 # Save predictions
 output_path = f"{FILE_PREFIX}/submission/my_submission.csv"
 y_pred.to_csv(output_path, index=False)
-
 
