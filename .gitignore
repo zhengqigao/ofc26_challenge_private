@@ -1,0 +1,33 @@
+# Model files
+model/*.pt
+model/*.pth
+
+# Submission files
+submission/*.csv
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Figures (optional - uncomment if you don't want to track figures)
+# figures/
