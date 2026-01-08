@@ -85,7 +85,7 @@ def custom_loss_L2_pytorch(y_pred, y_actual):
     # For each value, if actual==0, pred->0; else pred unchanged
     y_pred_cast_unloaded_to_zero = torch.where(y_actual != 0, y_pred, torch.zeros_like(y_pred))
     error = (y_pred_cast_unloaded_to_zero - y_actual) ** 2
-    loaded_size = (y_actual != 0).sum().float()
+    loaded_size = (y_actual != 0).sum().float().item()
     # avoid division by zero
     loss = torch.sqrt(error.sum() / (loaded_size + 1e-8))
     return loss, loaded_size
