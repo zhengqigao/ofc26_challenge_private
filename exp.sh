@@ -8,7 +8,7 @@ SAVE_BEST="--save_best"
 run_model=$1 # can be BasicFNN, LinearGateNet, GatedBasicFNN, ResidualFNN, AttentionFNN, ChannelWiseFNN, LightweightFNN, HybridFNN, DeepResidualFNN
 device=$2 
 
-CUDA_VISIBLE_DEVICES=device python main.py --nn_type ${run_model} --lr $LR --epochs $EPOCHS --batch_size $BATCH_SIZE --save_model_name ${run_model}.pt $SAVE_BEST
+CUDA_VISIBLE_DEVICES=${device} python main.py --nn_type ${run_model} --lr $LR --epochs $EPOCHS --batch_size $BATCH_SIZE --save_model_name ${run_model}.pt $SAVE_BEST
 
 # python main.py --nn_type LinearGateNet --lr $LR --epochs $EPOCHS --batch_size $BATCH_SIZE --save_model_name LinearGateNet.pt $SAVE_BEST
 

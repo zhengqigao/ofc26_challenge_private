@@ -218,6 +218,7 @@ if __name__ == "__main__":
 
     # --- Model create/train ---
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
     if args.nn_type == "BasicFNN":
         base_model = BasicFNN(X_tensor.shape[1], Numchannels).to(device)
     elif args.nn_type == "LinearGateNet":
