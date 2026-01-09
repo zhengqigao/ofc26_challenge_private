@@ -980,6 +980,13 @@ class Mymodel(nn.Module):
                 dim_feedforward=hidden_dim,
                 batch_first=True,
             ),
+                nn.SiLU(),
+                nn.TransformerEncoderLayer(
+                d_model=hidden_dim,
+                nhead=4,
+                dim_feedforward=hidden_dim,
+                batch_first=True,
+            ),
                 )
         elif token_model == "conv":
             self.layer = nn.Sequential(
