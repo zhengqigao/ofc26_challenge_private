@@ -167,9 +167,7 @@ if __name__ == "__main__":
             spectra_noise_std=0.0,
             global_noise_std=0.0,)
     else:
-        available_models = ["BasicFNN", "LinearGateNet", "GatedBasicFNN", "ResidualFNN", 
-                           "AttentionFNN", "ChannelWiseFNN", "LightweightFNN", "HybridFNN", "DeepResidualFNN", "SpectralCNN"]
-        raise ValueError(f"Invalid nn_type: {args.nn_type}. Available: {', '.join(available_models)}")
+        raise ValueError(f"Invalid nn_type: {args.nn_type}.")
 
     base_model.to(device)
     
