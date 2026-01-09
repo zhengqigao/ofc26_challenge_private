@@ -737,11 +737,11 @@ class ImprovedSpectralCNN(nn.Module):
             nn.Linear(hidden_channels, hidden_channels),
         )
 
-        self.conv_in = nn.Conv1d(3, hidden_channels, kernel_size=5, padding=3)
+        self.conv_in = nn.Conv1d(3, hidden_channels, kernel_size=5, padding=1)
         self.conv_mid = nn.Sequential(
             nn.SiLU(),
             nn.Dropout(dropout),
-            nn.Conv1d(hidden_channels, hidden_channels, kernel_size=5, padding=3),
+            nn.Conv1d(hidden_channels, hidden_channels, kernel_size=5, padding=1),
             nn.SiLU(),
             nn.Dropout(dropout),
         )
