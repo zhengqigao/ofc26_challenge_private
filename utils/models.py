@@ -950,10 +950,12 @@ class ImprovedEmbedDeepSpectralCNN(nn.Module):
 
         pos = self.channel_pos.to(x.device).unsqueeze(0).expand(x.size(0), -1)
         feat = torch.cat([spectra.unsqueeze(1), wss_embed, pos.unsqueeze(1)], dim=1)  # [B, 2 + hidden_embed_dim, N]
-
+        print(f"feat.shape: {feat.shape}")
+        
         h = self.conv_in(feat) # [B, hidden_channels, N]
         g = self.global_mlp(raw_global).unsqueeze(-1)
         h = h + g # [B, hidden_channels, N]
+        print(f"h.shape: {h.shape}")
         h = self.conv_mid(h) # [B, hidden_channels, N]
         residual = self.conv_out(h).squeeze(1) # [B, N]
 
