@@ -1,92 +1,69 @@
-# %%
-# libraries
-import matplotlib.pyplot as plt
-import pandas as pd
-import numpy as np
-import math, os, shutil
-# from prettytable import PrettyTable
-import scipy.stats as stats
-from sklearn.model_selection import train_test_split, KFold, GroupKFold
 import argparse
-import torch
-import torch.nn as nn
-import torch.optim as optim
-from torch.utils.data import TensorDataset, DataLoader, random_split, Subset
 import copy
-from utils.models import *
-# Set seeds
+import os
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import torch
+import torch.optim as optim
+from sklearn.model_selection import KFold, GroupKFold
+from sklearn.preprocessing import StandardScaler
+from torch.utils.data import DataLoader, TensorDataset
+
+from utils.models import (
+    AttentionFNN,
+    BasicFNN,
+    ChannelWiseFNN,
+    DeepResidualFNN,
+    GatedBasicFNN,
+    HybridFNN,
+    LightweightFNN,
+    LinearGateNet,
+    ResidualFNN,
+    SpectralCNN,
+    SpectralTransformer,
+)
+
+# Reproducibility
 print("PyTorch version:", torch.__version__)
 torch.manual_seed(256)
 np.random.seed(256)
 
-
-
-#%%
-# Full paths to training data
-TRAIN_FEATURE_PATH = f"./data/train_features.csv"
-TRAIN_LABEL_PATH   = f"./data/train_labels.csv"
-
-# Full path to test data
-TEST_FEATURE_PATH = f"./data/test_features.csv"
+# Paths
+TRAIN_FEATURE_PATH = "./data/train_features.csv"
+TRAIN_LABEL_PATH = "./data/train_labels.csv"
+TEST_FEATURE_PATH = "./data/test_features.csv"
 
 # Output folders
-figure_prepath = f"./figures/"
-model_prepath = f"./model/"
+FIGURE_DIR = "./figures"
+MODEL_DIR = "./model"
+SUBMISSION_DIR = "./submission"
 
-# Create output folders if not existed
-os.makedirs(figure_prepath, exist_ok=True)
-os.makedirs(model_prepath, exist_ok=True)
+os.makedirs(FIGURE_DIR, exist_ok=True)
+os.makedirs(MODEL_DIR, exist_ok=True)
+os.makedirs(SUBMISSION_DIR, exist_ok=True)
 
-# Plotting configuration
-figureFrontSize = 12
-figureName_post = "_test.png"
+# Feature labels
+NUM_CHANNELS = 95
+LABELS = {
+    "gainValue": "target_gain",
+    "EDFA_input": "EDFA_input_power_total",
+    "EDFA_output": "EDFA_output_power_total",
+    "inSpectra": "EDFA_input_spectra_",
+    "WSS": "DUT_WSS_activated_channel_index_",
+    "result": "calculated_gain_spectra_",
+}
 
 
-# %%
-### helper labels - fixed
-Numchannels = 95
-num_inputFeatures = Numchannels * 2 + 4 # target_gain, target_gain_tilt, EDFA_input_power_total, EDFA_output_power_total
-labels = {"gainValue":'target_gain',
-          "EDFA_input":'EDFA_input_power_total',
-          "EDFA_output":'EDFA_output_power_total',
-          "inSpectra":'EDFA_input_spectra_',
-          "WSS":'DUT_WSS_activated_channel_index_',
-          "result":'calculated_gain_spectra_'}
-inSpectra_labels = [labels['inSpectra']+str(i).zfill(2) for i in range(0,Numchannels)]
-onehot_labels = [labels['WSS']+str(i).zfill(2) for i in range(0,Numchannels)]
-result_labels = [labels['result']+str(i).zfill(2) for i in range(0,Numchannels)]
-preProcess_labels = [labels['EDFA_input'],labels['EDFA_output']]
-preProcess_labels.extend(inSpectra_labels)
+# -------------------------
+# Losses and regularizers
+# -------------------------
 
-# %%
-# def dB_to_linear(data):
-#   return np.power(10,data/10)
-
-# def linear_TO_Db(data):
-#   result = 10*np.log10(data).to_numpy()
-#   return result[result != -np.inf]
-
-# def linear_TO_Db_full(data):
-#   result = 10*np.log10(data).to_numpy()
-#   result[result == -np.inf] = 0
-#   return result
-
-# def divideZero(numerator,denominator):
-#   with np.errstate(divide='ignore'):
-#     result = numerator / denominator
-#     result[denominator == 0] = 0
-#   return result
-
-# %%
-### PyTorch Loss
 def custom_loss_L2_pytorch(y_pred, y_actual):
-    # y_pred, y_actual shape: [batch, channels]
-    # turn unloaded y_pred prediction to zero
-    # For each value, if actual==0, pred->0; else pred unchanged
-    y_pred_cast_unloaded_to_zero = torch.where(y_actual != 0, y_pred, torch.zeros_like(y_pred))
-    error = (y_pred_cast_unloaded_to_zero - y_actual) ** 2
+    y_pred_cast = torch.where(y_actual != 0, y_pred, torch.zeros_like(y_pred))
+    error = (y_pred_cast - y_actual) ** 2
     loaded_size = (y_actual != 0).sum().float().item()
-    # avoid division by zero
     loss = torch.sqrt(error.sum() / (loaded_size + 1e-8))
     return loss, loaded_size
 
@@ -100,7 +77,7 @@ def masked_huber_loss(y_pred, y_actual, delta=1.0):
     abs_diff = diff.abs()
     quadratic = torch.clamp(abs_diff, max=delta)
     linear = abs_diff - quadratic
-    loss = 0.5 * quadratic ** 2 + delta * linear
+    loss = 0.5 * quadratic**2 + delta * linear
     loss = loss[mask].mean()
     return loss, loaded_size
 
@@ -113,6 +90,14 @@ def smoothness_loss(y_pred, y_actual):
     mask_adj = (mask[:, 1:] & mask[:, :-1]).float()
     denom = mask_adj.sum().clamp_min(1.0)
     return (diff.abs() * mask_adj).sum() / denom
+
+
+def compute_base_loss(y_pred, y_actual, loss_type, huber_delta):
+    if loss_type == "masked_rmse":
+        return custom_loss_L2_pytorch(y_pred, y_actual)
+    if loss_type == "masked_huber":
+        return masked_huber_loss(y_pred, y_actual, delta=huber_delta)
+    raise ValueError(f"Unknown loss_type: {loss_type}")
 
 
 def apply_channel_dropout(xb, yb, drop_prob):
@@ -135,13 +120,54 @@ def apply_channel_dropout(xb, yb, drop_prob):
     return xb, yb
 
 
-def compute_base_loss(y_pred, y_actual, loss_type, huber_delta):
-    if loss_type == "masked_rmse":
-        return custom_loss_L2_pytorch(y_pred, y_actual)
-    if loss_type == "masked_huber":
-        return masked_huber_loss(y_pred, y_actual, delta=huber_delta)
-    raise ValueError(f"Unknown loss_type: {loss_type}")
+# -------------------------
+# Feature utilities
+# -------------------------
 
+def build_feature_columns(num_channels, labels):
+    global_cols = [
+        labels["gainValue"],
+        "target_gain_tilt",
+        labels["EDFA_input"],
+        labels["EDFA_output"],
+    ]
+    spectra_cols = [labels["inSpectra"] + str(i).zfill(2) for i in range(num_channels)]
+    wss_cols = [labels["WSS"] + str(i).zfill(2) for i in range(num_channels)]
+    feature_cols = global_cols + [col for pair in zip(spectra_cols, wss_cols) for col in pair]
+    return global_cols, spectra_cols, wss_cols, feature_cols
+
+
+def select_feature_frame(df, feature_cols):
+    missing = [col for col in feature_cols if col not in df.columns]
+    if missing:
+        raise ValueError(
+            f"Missing feature columns: {missing[:5]}{'...' if len(missing) > 5 else ''}"
+        )
+    return df[feature_cols].copy()
+
+
+def fit_feature_scalers(x_df, global_scale_cols, spectra_cols):
+    global_scaler = None
+    if global_scale_cols:
+        global_scaler = StandardScaler()
+        global_scaler.fit(x_df[global_scale_cols])
+    spectra_scaler = StandardScaler()
+    spectra_scaler.fit(x_df[spectra_cols].values / 100.0)
+    return global_scaler, spectra_scaler
+
+
+def apply_feature_scalers(x_df, global_scale_cols, spectra_cols, global_scaler, spectra_scaler):
+    x_scaled = x_df.copy()
+    if global_scaler is not None and global_scale_cols:
+        x_scaled[global_scale_cols] = global_scaler.transform(x_scaled[global_scale_cols])
+    scaled_spectra = spectra_scaler.transform(x_scaled[spectra_cols].values / 100.0)
+    x_scaled[spectra_cols] = scaled_spectra * 100.0
+    return x_scaled
+
+
+# -------------------------
+# Model utilities
+# -------------------------
 
 def build_model(args, input_dim, num_channels):
     if args.nn_type == "BasicFNN":
@@ -176,19 +202,27 @@ def build_model(args, input_dim, num_channels):
         )
     if args.nn_type == "SpectralCNN":
         return SpectralCNN(
-        input_dim,
-        output_dim = num_channels,
-        num_channels = num_channels,
-        global_dim=4,
-        hidden_channels=32,
-        dropout=args.spectral_dropout,
-        spectra_noise_std=args.spectra_noise_std,
-        global_noise_std=args.global_noise_std,)
-        
-    available_models = ["BasicFNN", "LinearGateNet", "GatedBasicFNN", "ResidualFNN",
-                        "AttentionFNN", "ChannelWiseFNN", "LightweightFNN", "HybridFNN",
-                        "DeepResidualFNN", "SpectralTransformer", "SpectralCNN"]
-    raise ValueError(f"Invalid nn_type: {args.nn_type}. Available: {', '.join(available_models)}")
+            input_dim,
+            num_channels,
+            hidden_channels=args.cnn_channels,
+            dropout=args.cnn_dropout,
+            spectra_noise_std=args.spectra_noise_std,
+            global_noise_std=args.global_noise_std,
+        )
+    available = [
+        "BasicFNN",
+        "LinearGateNet",
+        "GatedBasicFNN",
+        "ResidualFNN",
+        "AttentionFNN",
+        "ChannelWiseFNN",
+        "LightweightFNN",
+        "HybridFNN",
+        "DeepResidualFNN",
+        "SpectralTransformer",
+        "SpectralCNN",
+    ]
+    raise ValueError(f"Invalid nn_type: {args.nn_type}. Available: {', '.join(available)}")
 
 
 def train_model(base_model, train_loader, val_loader, args, fold_idx=None):
@@ -210,6 +244,7 @@ def train_model(base_model, train_loader, val_loader, args, fold_idx=None):
     epochs_no_improve = 0
     track_best = args.save_best or (args.early_stop_patience > 0)
     prefix = f"[Fold {fold_idx}] " if fold_idx is not None else ""
+    device = next(base_model.parameters()).device
 
     for epoch in range(args.epochs):
         # Train
@@ -217,8 +252,8 @@ def train_model(base_model, train_loader, val_loader, args, fold_idx=None):
         running_loss = 0.0
         total_size = 0
         for xb, yb in train_loader:
-            xb = xb.to(next(base_model.parameters()).device)
-            yb = yb.to(next(base_model.parameters()).device)
+            xb = xb.to(device)
+            yb = yb.to(device)
             if args.channel_dropout > 0:
                 xb, yb = apply_channel_dropout(xb, yb, args.channel_dropout)
             optimizer.zero_grad()
@@ -241,8 +276,8 @@ def train_model(base_model, train_loader, val_loader, args, fold_idx=None):
         total_size = 0
         with torch.no_grad():
             for xb, yb in val_loader:
-                xb = xb.to(next(base_model.parameters()).device)
-                yb = yb.to(next(base_model.parameters()).device)
+                xb = xb.to(device)
+                yb = yb.to(device)
                 pred = base_model(xb)
                 base_loss, loaded_size = compute_base_loss(pred, yb, args.loss_type, args.huber_delta)
                 if loaded_size == 0:
@@ -253,7 +288,10 @@ def train_model(base_model, train_loader, val_loader, args, fold_idx=None):
         val_losses.append(val_loss)
 
         if epoch % 100 == 0:
-            print(f"{prefix}Epoch {epoch+1}/{args.epochs}: TrainLoss={train_losses[-1]:.5f}  ValLoss={val_losses[-1]:.5f}")
+            print(
+                f"{prefix}Epoch {epoch+1}/{args.epochs}: "
+                f"TrainLoss={train_losses[-1]:.5f}  ValLoss={val_losses[-1]:.5f}"
+            )
 
         if val_loss < best_val_loss - args.early_stop_min_delta:
             best_val_loss = val_loss
@@ -287,92 +325,104 @@ def fold_model_path(base_path, fold_idx):
     return f"{base_path}_fold{fold_idx}.pt"
 
 
+def write_submission(y_pred_array, output_tag, y_train_columns, x_test_full, x_test_features, wss_cols):
+    y_pred = pd.DataFrame(y_pred_array, columns=y_train_columns)
+    mask = x_test_features[wss_cols].values == 1
+    y_pred = pd.DataFrame(np.where(mask, y_pred.values, np.nan), columns=y_train_columns)
+    y_pred.fillna(0, inplace=True)
 
-def plot_loss(indx,train_losses,val_losses,ingnoreIndex):
+    kaggle_id = x_test_full.columns[0]
+    y_pred.insert(0, kaggle_id, x_test_full[kaggle_id].values)
+
+    output_path = os.path.join(SUBMISSION_DIR, f"my_submission_{output_tag}.csv")
+    y_pred.to_csv(output_path, index=False)
+    return output_path
+
+
+def plot_loss(indx, train_losses, val_losses, ignore_index):
     plt.figure(indx)
-    plt.plot(train_losses[ingnoreIndex:], label='loss')
-    plt.plot(val_losses[ingnoreIndex:], label='val_loss')
-    plt.xlabel('Epoch')
-    plt.ylabel('Error [gain]')
+    plt.plot(train_losses[ignore_index:], label="loss")
+    plt.plot(val_losses[ignore_index:], label="val_loss")
+    plt.xlabel("Epoch")
+    plt.ylabel("Error [gain]")
     plt.legend()
     plt.grid(True)
     plt.show()
 
-# def figure_comp(figIndx,y_test_result,y_pred_result,filename,setFrontSize):
-#     plt.figure(figIndx)
-#     plt.axes(aspect='equal')
-#     plt.scatter(y_test_result, y_pred_result)
-#     plt.xlabel('Measured EDFA Gain (dB)', fontsize=setFrontSize)
-#     plt.ylabel('predicted EDFA Gain (dB)', fontsize=setFrontSize)
-#     minAxis = math.floor(min(y_test_result.min(),y_pred_result.min()) - 0.5)
-#     maxAxis = math.ceil (max(y_test_result.max(),y_pred_result.max()) + 0.5)
-#     limss = [*np.arange(minAxis,maxAxis+1,1)]
-#     lims = [limss[0],limss[-1]]
-#     plt.xlim(lims)
-#     plt.ylim(lims)
-#     plt.plot(lims, lims, 'k--')
-#     plt.xticks(ticks=limss,labels=limss,fontsize=setFrontSize)
-#     plt.yticks(fontsize=setFrontSize)
-#     plt.savefig(figure_prepath+filename, dpi=900)
 
-# def figure_hist(figIndx,error,filename,setFrontSize):
-#     plt.figure(figIndx)
-#     bins_list = [*np.arange(-0.6,0.7,0.1)]
-#     labelList = ['-0.6','','-0.4','','-0.2','','0.0','','0.2','','0.4','','0.6']
-#     plt.hist(error, bins=bins_list)
-#     for i in [-0.2,-0.1,0.1,0.2]: # helper vertical line
-#         plt.axvline(x=i,color='black',ls='--')
-#     plt.xlabel('Prediction Gain Error (dB)', fontsize=setFrontSize)
-#     plt.ylabel('Histogram', fontsize=setFrontSize)
-#     plt.xticks(ticks=bins_list, labels=labelList, fontsize=setFrontSize)
-#     plt.yticks(fontsize=setFrontSize)
-#     plt.savefig(figure_prepath+filename, dpi=900)
+# -------------------------
+# Defaults and validation
+# -------------------------
 
-# def plot_per_channel_error(y_pred,y_test):
-#     y_pred_result = linear_TO_Db_full(y_pred)
-#     y_test_result = linear_TO_Db_full(y_test)
-#     error = y_test_result - y_pred_result
-#     error_min_0_1s,error_means,error_min_0_2s,within95ranges,mses = [],[],[],[],[]
-#     for j in range(len(error[0])):
-#         error_channel = error[:,j]
-#         error_channel = error_channel[error_channel!=0]
-#         # calculate the distribution
-#         error_reasonable = [i for i in error_channel if abs(i)<=0.2]
-#         error_measureError = [i for i in error_channel if abs(i)<=0.1]
-#         error_min_0_1 = len(error_measureError)/len(error_channel)
-#         error_min_0_2 = len(error_reasonable)/len(error_channel)
-#         error_sorted = np.sort(abs(error_channel))
-#         within95range = error_sorted[int(0.95*len(error_channel))]
-#         mse = (np.square(error_channel)).mean(axis=None)
-#         error_mean = error_channel.mean(axis=None)
-#         error_means.append(error_mean)
-#         error_min_0_1s.append(error_min_0_1)
-#         error_min_0_2s.append(error_min_0_2)
-#         within95ranges.append(within95range)
-#         mses.append(mse)
-#     plt.figure(103)
-#     plt.plot(mses)
-#     plt.xlabel('Channel indices')
-#     plt.ylabel('MSE (dB^2)')
-#     plt.title("Per channel MSE")
-      
-# def getErrorInfo(error):
-#     error_reasonable = [i for i in error if abs(i)<=0.2]
-#     error_measureError = [i for i in error if abs(i)<=0.1]
-#     error_min_0_1 = len(error_measureError)/len(error)
-#     error_min_0_2 = len(error_reasonable)/len(error)
-#     error_sorted = np.sort(abs(error))
-#     within95range = error_sorted[int(0.95*len(error))]
-#     mse = (np.square(error)).mean(axis=None)
-#     return_error_min_0_1 = "{:.2f}".format(error_min_0_1)
-#     return_error_min_0_2 = "{:.2f}".format(error_min_0_2)
-#     return_within95range = "{:.2f}".format(within95range)
-#     return_mse = "{:.2f}".format(mse)
-#     return return_error_min_0_1,return_error_min_0_2,return_within95range,return_mse
+def resolve_defaults(args):
+    def default_if_none(value, default):
+        return default if value is None else value
+
+    is_spectral = args.nn_type in {"SpectralTransformer", "SpectralCNN"}
+
+    if is_spectral:
+        args.loss_type = default_if_none(args.loss_type, "masked_huber")
+        args.smooth_lambda = default_if_none(args.smooth_lambda, 0.05)
+        args.spectra_noise_std = default_if_none(args.spectra_noise_std, 0.01)
+        args.global_noise_std = default_if_none(args.global_noise_std, 0.02)
+        args.channel_dropout = default_if_none(args.channel_dropout, 0.1)
+        args.weight_decay = default_if_none(args.weight_decay, 0.05)
+        args.early_stop_patience = default_if_none(args.early_stop_patience, 100)
+        args.early_stop_min_delta = default_if_none(args.early_stop_min_delta, 1e-4)
+        args.lr_scheduler = default_if_none(args.lr_scheduler, "plateau")
+        args.plateau_patience = default_if_none(args.plateau_patience, 50)
+        args.plateau_factor = default_if_none(args.plateau_factor, 0.5)
+        args.min_lr = default_if_none(args.min_lr, 1e-6)
+        args.cv_folds = default_if_none(args.cv_folds, 5)
+        args.spectral_embed_dim = default_if_none(args.spectral_embed_dim, 64)
+        args.spectral_heads = default_if_none(args.spectral_heads, 4)
+        args.spectral_layers = default_if_none(args.spectral_layers, 2)
+        args.spectral_dropout = default_if_none(args.spectral_dropout, 0.25)
+        args.spectral_ff_mult = default_if_none(args.spectral_ff_mult, 2)
+        args.cnn_channels = default_if_none(args.cnn_channels, 32)
+        args.cnn_dropout = default_if_none(args.cnn_dropout, 0.25)
+        args.use_scaler = default_if_none(args.use_scaler, True)
+    else:
+        args.loss_type = default_if_none(args.loss_type, "masked_rmse")
+        args.smooth_lambda = default_if_none(args.smooth_lambda, 0.0)
+        args.spectra_noise_std = default_if_none(args.spectra_noise_std, 0.0)
+        args.global_noise_std = default_if_none(args.global_noise_std, 0.0)
+        args.channel_dropout = default_if_none(args.channel_dropout, 0.0)
+        args.weight_decay = default_if_none(args.weight_decay, 0.01)
+        args.early_stop_patience = default_if_none(args.early_stop_patience, 0)
+        args.early_stop_min_delta = default_if_none(args.early_stop_min_delta, 0.0)
+        args.lr_scheduler = default_if_none(args.lr_scheduler, "none")
+        args.plateau_patience = default_if_none(args.plateau_patience, 0)
+        args.plateau_factor = default_if_none(args.plateau_factor, 0.5)
+        args.min_lr = default_if_none(args.min_lr, 1e-6)
+        args.cv_folds = default_if_none(args.cv_folds, 1)
+        args.spectral_embed_dim = default_if_none(args.spectral_embed_dim, 64)
+        args.spectral_heads = default_if_none(args.spectral_heads, 4)
+        args.spectral_layers = default_if_none(args.spectral_layers, 2)
+        args.spectral_dropout = default_if_none(args.spectral_dropout, 0.1)
+        args.spectral_ff_mult = default_if_none(args.spectral_ff_mult, 2)
+        args.cnn_channels = default_if_none(args.cnn_channels, 32)
+        args.cnn_dropout = default_if_none(args.cnn_dropout, 0.1)
+        args.use_scaler = default_if_none(args.use_scaler, True)
+
+    if args.loss_type not in {"masked_rmse", "masked_huber"}:
+        raise ValueError("loss_type must be masked_rmse or masked_huber")
+    if args.lr_scheduler not in {"none", "plateau"}:
+        raise ValueError("lr_scheduler must be none or plateau")
+    if args.cv_folds < 1:
+        raise ValueError("cv_folds must be >= 1")
+
+    if args.cv_group_col in {"none", "None", ""}:
+        args.cv_group_col = None
+    if args.cv_folds > 1 and args.cv_group_col is None:
+        args.cv_group_col = "edfa_index"
+
+    args.save_fold_csv = default_if_none(args.save_fold_csv, args.cv_folds > 1)
+
+    return args
 
 
-if __name__ == "__main__":
-    
+def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--lr", type=float, default=0.01)
     parser.add_argument("--epochs", type=int, default=500)
@@ -380,135 +430,148 @@ if __name__ == "__main__":
     parser.add_argument("--save_model_name", type=str, default="model.pt")
     parser.add_argument("--nn_type", type=str, default="BasicFNN")
     parser.add_argument("--plot_loss", action="store_true", default=False)
-    parser.add_argument("--save_best", action="store_true", default=False) # default save the model after the last epoch, if save_best is True, save the model when the validation loss is the best
+    parser.add_argument("--save_best", action="store_true", default=False)
+
     parser.add_argument("--weight_decay", type=float, default=None)
-    parser.add_argument("--loss_type", type=str, default=None)  # masked_rmse or masked_huber
+    parser.add_argument("--loss_type", type=str, default=None)
     parser.add_argument("--huber_delta", type=float, default=1.0)
     parser.add_argument("--smooth_lambda", type=float, default=None)
     parser.add_argument("--spectra_noise_std", type=float, default=None)
     parser.add_argument("--global_noise_std", type=float, default=None)
     parser.add_argument("--channel_dropout", type=float, default=None)
+    parser.add_argument("--use_scaler", action=argparse.BooleanOptionalAction, default=None)
+    parser.add_argument("--save_fold_csv", action=argparse.BooleanOptionalAction, default=None)
+
     parser.add_argument("--early_stop_patience", type=int, default=None)
     parser.add_argument("--early_stop_min_delta", type=float, default=None)
-    parser.add_argument("--lr_scheduler", type=str, default=None)  # none or plateau
+    parser.add_argument("--lr_scheduler", type=str, default=None)
     parser.add_argument("--plateau_patience", type=int, default=None)
     parser.add_argument("--plateau_factor", type=float, default=None)
     parser.add_argument("--min_lr", type=float, default=None)
+
     parser.add_argument("--cv_folds", type=int, default=None)
     parser.add_argument("--cv_group_col", type=str, default=None)
     parser.add_argument("--cv_seed", type=int, default=256)
+
     parser.add_argument("--spectral_embed_dim", type=int, default=None)
     parser.add_argument("--spectral_heads", type=int, default=None)
     parser.add_argument("--spectral_layers", type=int, default=None)
     parser.add_argument("--spectral_dropout", type=float, default=None)
     parser.add_argument("--spectral_ff_mult", type=int, default=None)
-    args = parser.parse_args()
 
-    def _default_if_none(value, default):
-        return default if value is None else value
+    parser.add_argument("--cnn_channels", type=int, default=None)
+    parser.add_argument("--cnn_dropout", type=float, default=None)
 
-    if args.nn_type == "SpectralTransformer":
-        args.loss_type = _default_if_none(args.loss_type, "masked_huber")
-        args.smooth_lambda = _default_if_none(args.smooth_lambda, 0.05)
-        args.spectra_noise_std = _default_if_none(args.spectra_noise_std, 0.01)
-        args.global_noise_std = _default_if_none(args.global_noise_std, 0.02)
-        args.channel_dropout = _default_if_none(args.channel_dropout, 0.1)
-        args.weight_decay = _default_if_none(args.weight_decay, 0.05)
-        args.early_stop_patience = _default_if_none(args.early_stop_patience, 150)
-        args.early_stop_min_delta = _default_if_none(args.early_stop_min_delta, 1e-4)
-        args.lr_scheduler = _default_if_none(args.lr_scheduler, "plateau")
-        args.plateau_patience = _default_if_none(args.plateau_patience, 50)
-        args.plateau_factor = _default_if_none(args.plateau_factor, 0.5)
-        args.min_lr = _default_if_none(args.min_lr, 1e-6)
-        args.cv_folds = _default_if_none(args.cv_folds, 1)
-        args.spectral_embed_dim = _default_if_none(args.spectral_embed_dim, 64)
-        args.spectral_heads = _default_if_none(args.spectral_heads, 4)
-        args.spectral_layers = _default_if_none(args.spectral_layers, 2)
-        args.spectral_dropout = _default_if_none(args.spectral_dropout, 0.25)
-        args.spectral_ff_mult = _default_if_none(args.spectral_ff_mult, 2)
-    else:
-        args.loss_type = _default_if_none(args.loss_type, "masked_rmse")
-        args.smooth_lambda = _default_if_none(args.smooth_lambda, 0.0)
-        args.spectra_noise_std = _default_if_none(args.spectra_noise_std, 0.0)
-        args.global_noise_std = _default_if_none(args.global_noise_std, 0.0)
-        args.channel_dropout = _default_if_none(args.channel_dropout, 0.0)
-        args.weight_decay = _default_if_none(args.weight_decay, 0.01)
-        args.early_stop_patience = _default_if_none(args.early_stop_patience, 0)
-        args.early_stop_min_delta = _default_if_none(args.early_stop_min_delta, 0.0)
-        args.lr_scheduler = _default_if_none(args.lr_scheduler, "none")
-        args.plateau_patience = _default_if_none(args.plateau_patience, 0)
-        args.plateau_factor = _default_if_none(args.plateau_factor, 0.5)
-        args.min_lr = _default_if_none(args.min_lr, 1e-6)
-        args.cv_folds = _default_if_none(args.cv_folds, 1)
-        args.spectral_embed_dim = _default_if_none(args.spectral_embed_dim, 64)
-        args.spectral_heads = _default_if_none(args.spectral_heads, 4)
-        args.spectral_layers = _default_if_none(args.spectral_layers, 2)
-        args.spectral_dropout = _default_if_none(args.spectral_dropout, 0.1)
-        args.spectral_ff_mult = _default_if_none(args.spectral_ff_mult, 2)
+    return parser.parse_args()
 
-    if args.loss_type not in {"masked_rmse", "masked_huber"}:
-        raise ValueError(f"Invalid loss_type: {args.loss_type}. Use masked_rmse or masked_huber.")
-    if args.lr_scheduler not in {"none", "plateau"}:
-        raise ValueError(f"Invalid lr_scheduler: {args.lr_scheduler}. Use none or plateau.")
-    if args.cv_folds < 1:
-        raise ValueError("--cv_folds must be >= 1.")
-    
+
+# -------------------------
+# Main
+# -------------------------
+
+def main():
+    args = resolve_defaults(parse_args())
+
+    # Load data
     X_train_full = pd.read_csv(TRAIN_FEATURE_PATH)
-    X_train = X_train_full.iloc[:, 3:]
     y_train = pd.read_csv(TRAIN_LABEL_PATH)
-
     y_train.fillna(0, inplace=True)
 
-    TrainModelName = model_prepath + args.save_model_name
+    global_cols, spectra_cols, wss_cols, feature_cols = build_feature_columns(NUM_CHANNELS, LABELS)
+    X_train_features = select_feature_frame(X_train_full, feature_cols)
 
-    # --- Torch: Prepare Data ---
-    X_np = X_train.values.astype(np.float32)
-    y_np = y_train.values.astype(np.float32)
+    X_test_full = pd.read_csv(TEST_FEATURE_PATH)
+    X_test_features = select_feature_frame(X_test_full, feature_cols)
 
-    X_tensor = torch.from_numpy(X_np)
-    y_tensor = torch.from_numpy(y_np)
+    # Scaling policy: keep target_gain/tilt raw for spectral baselines
+    if args.nn_type in {"SpectralTransformer", "SpectralCNN"}:
+        global_scale_cols = [LABELS["EDFA_input"], LABELS["EDFA_output"]]
+    else:
+        global_scale_cols = global_cols
 
-    # Create TensorDataset
-    dataset = TensorDataset(X_tensor, y_tensor)
+    train_indices = np.arange(len(X_train_features))
 
-    # --- Device ---
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
-    # --- Test data ---
-    X_test_full = pd.read_csv(TEST_FEATURE_PATH)
-    X_test = X_test_full.iloc[:, 5:]
-    X_test_tensor = torch.from_numpy(X_test.values.astype(np.float32)).to(device)
+    train_model_name = os.path.join(MODEL_DIR, args.save_model_name)
 
     if args.cv_folds > 1:
-        indices = np.arange(len(dataset))
         if args.cv_group_col:
             if args.cv_group_col not in X_train_full.columns:
                 raise ValueError(f"cv_group_col {args.cv_group_col} not found in training features.")
             groups = X_train_full[args.cv_group_col].values
             splitter = GroupKFold(n_splits=args.cv_folds)
-            splits = splitter.split(indices, groups=groups)
+            splits = splitter.split(train_indices, groups=groups)
         else:
             splitter = KFold(n_splits=args.cv_folds, shuffle=True, random_state=args.cv_seed)
-            splits = splitter.split(indices)
+            splits = splitter.split(train_indices)
 
         pred_sum = None
         fold_best_vals = []
         for fold_idx, (train_idx, val_idx) in enumerate(splits, start=1):
-            train_loader = DataLoader(Subset(dataset, train_idx), batch_size=args.batch_size, shuffle=True, drop_last=False)
-            val_loader = DataLoader(Subset(dataset, val_idx), batch_size=args.batch_size, shuffle=False, drop_last=False)
+            x_train_fold = X_train_features.iloc[train_idx]
+            x_val_fold = X_train_features.iloc[val_idx]
+            y_train_fold = y_train.iloc[train_idx]
+            y_val_fold = y_train.iloc[val_idx]
 
-            base_model = build_model(args, X_tensor.shape[1], Numchannels).to(device)
+            if args.use_scaler:
+                global_scaler, spectra_scaler = fit_feature_scalers(
+                    x_train_fold, global_scale_cols, spectra_cols
+                )
+                x_train_fold = apply_feature_scalers(
+                    x_train_fold, global_scale_cols, spectra_cols, global_scaler, spectra_scaler
+                )
+                x_val_fold = apply_feature_scalers(
+                    x_val_fold, global_scale_cols, spectra_cols, global_scaler, spectra_scaler
+                )
+                x_test_fold = apply_feature_scalers(
+                    X_test_features, global_scale_cols, spectra_cols, global_scaler, spectra_scaler
+                )
+            else:
+                x_test_fold = X_test_features
+
+            train_loader = DataLoader(
+                TensorDataset(
+                    torch.from_numpy(x_train_fold.values.astype(np.float32)),
+                    torch.from_numpy(y_train_fold.values.astype(np.float32)),
+                ),
+                batch_size=args.batch_size,
+                shuffle=True,
+                drop_last=False,
+            )
+            val_loader = DataLoader(
+                TensorDataset(
+                    torch.from_numpy(x_val_fold.values.astype(np.float32)),
+                    torch.from_numpy(y_val_fold.values.astype(np.float32)),
+                ),
+                batch_size=args.batch_size,
+                shuffle=False,
+                drop_last=False,
+            )
+
+            model = build_model(args, x_train_fold.shape[1], NUM_CHANNELS).to(device)
             best_model, train_losses, val_losses, best_val = train_model(
-                base_model, train_loader, val_loader, args, fold_idx=fold_idx
+                model, train_loader, val_loader, args, fold_idx=fold_idx
             )
             fold_best_vals.append(best_val)
 
-            fold_path = fold_model_path(TrainModelName, fold_idx)
+            fold_path = fold_model_path(train_model_name, fold_idx)
             torch.save(best_model, fold_path)
 
-            fold_pred = predict_model(best_model, X_test_tensor)
+            x_test_tensor = torch.from_numpy(x_test_fold.values.astype(np.float32)).to(device)
+            fold_pred = predict_model(best_model, x_test_tensor)
             pred_sum = fold_pred if pred_sum is None else pred_sum + fold_pred
+            if args.save_fold_csv:
+                fold_tag = f"{args.nn_type}_cv{args.cv_folds}_fold{fold_idx}"
+                write_submission(
+                    fold_pred,
+                    fold_tag,
+                    y_train.columns,
+                    X_test_full,
+                    X_test_features,
+                    wss_cols,
+                )
 
         y_pred_array = pred_sum / args.cv_folds
         print(f"CV best val mean={np.mean(fold_best_vals):.5f} std={np.std(fold_best_vals):.5f}")
@@ -516,51 +579,85 @@ if __name__ == "__main__":
             print("Plotting loss is disabled for cross-validation.")
         output_tag = f"{args.nn_type}_cv{args.cv_folds}"
     else:
-        # Split into train and val (as keras validation_split=0.2)
-        n_total = len(dataset)
+        n_total = len(X_train_features)
         n_val = int(0.2 * n_total)
-        n_train = n_total - n_val
-        train_dataset, val_dataset = random_split(
-            dataset, [n_train, n_val], generator=torch.Generator().manual_seed(256)
+        rng = np.random.default_rng(256)
+        perm = rng.permutation(n_total)
+        val_idx = perm[:n_val]
+        train_idx = perm[n_val:]
+
+        x_train = X_train_features.iloc[train_idx]
+        x_val = X_train_features.iloc[val_idx]
+        y_train_split = y_train.iloc[train_idx]
+        y_val_split = y_train.iloc[val_idx]
+
+        if args.use_scaler:
+            global_scaler, spectra_scaler = fit_feature_scalers(
+                x_train, global_scale_cols, spectra_cols
+            )
+            x_train = apply_feature_scalers(
+                x_train, global_scale_cols, spectra_cols, global_scaler, spectra_scaler
+            )
+            x_val = apply_feature_scalers(
+                x_val, global_scale_cols, spectra_cols, global_scaler, spectra_scaler
+            )
+            x_test_scaled = apply_feature_scalers(
+                X_test_features, global_scale_cols, spectra_cols, global_scaler, spectra_scaler
+            )
+        else:
+            x_test_scaled = X_test_features
+
+        train_loader = DataLoader(
+            TensorDataset(
+                torch.from_numpy(x_train.values.astype(np.float32)),
+                torch.from_numpy(y_train_split.values.astype(np.float32)),
+            ),
+            batch_size=args.batch_size,
+            shuffle=True,
+            drop_last=False,
+        )
+        val_loader = DataLoader(
+            TensorDataset(
+                torch.from_numpy(x_val.values.astype(np.float32)),
+                torch.from_numpy(y_val_split.values.astype(np.float32)),
+            ),
+            batch_size=args.batch_size,
+            shuffle=False,
+            drop_last=False,
         )
 
-        train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, drop_last=False)
-        val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, drop_last=False)
-
-        base_model = build_model(args, X_tensor.shape[1], Numchannels).to(device)
-        best_model, train_losses, val_losses, best_val_loss = train_model(base_model, train_loader, val_loader, args)
+        model = build_model(args, x_train.shape[1], NUM_CHANNELS).to(device)
+        best_model, train_losses, val_losses, best_val_loss = train_model(
+            model, train_loader, val_loader, args
+        )
 
         if args.save_best or args.early_stop_patience > 0:
-            print(f"Saving {args.nn_type} model when the validation loss is the best (val_loss={best_val_loss:.5f})")
+            print(
+                f"Saving {args.nn_type} model when the validation loss is the best "
+                f"(val_loss={best_val_loss:.5f})"
+            )
         else:
             print(f"Saving {args.nn_type} model after the last epoch")
-        torch.save(best_model, TrainModelName)
+        torch.save(best_model, train_model_name)
 
         if args.plot_loss:
             plot_loss(1, train_losses, val_losses, 15)
         else:
             print("Plotting loss is disabled")
 
-        y_pred_array = predict_model(best_model, X_test_tensor)
+        x_test_tensor = torch.from_numpy(x_test_scaled.values.astype(np.float32)).to(device)
+        y_pred_array = predict_model(best_model, x_test_tensor)
         output_tag = args.nn_type
-    
-    # Convert prediction to DataFrame
-    y_pred = pd.DataFrame(y_pred_array, columns=y_train.columns)
 
-    wss_cols = [col for col in X_test.columns if 'dut_wss_activated_channel_index' in col.lower()]
-    label_cols = [col for col in y_train.columns if 'calculated_gain_spectra' in col.lower()]
-
-    # Save to CSV (mask same as before)
-    mask = X_test[wss_cols].values == 1
-
-    y_pred = pd.DataFrame(np.where(mask, y_pred.values, np.nan),
-        columns=label_cols
+    write_submission(
+        y_pred_array,
+        output_tag,
+        y_train.columns,
+        X_test_full,
+        X_test_features,
+        wss_cols,
     )
-    y_pred.fillna(0, inplace=True)
 
-    kaggle_ID = X_test_full.columns[0]
-    y_pred.insert(0, kaggle_ID, X_test_full[kaggle_ID].values)
 
-    # Save predictions
-    output_path = f"./submission/my_submission_{output_tag}.csv"
-    y_pred.to_csv(output_path, index=False)
+if __name__ == "__main__":
+    main()
