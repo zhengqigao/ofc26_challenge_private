@@ -33,14 +33,6 @@ TEST_FEATURE_PATH = f"./data/test_features.csv"
 figure_prepath = f"./figures/"
 model_prepath = f"./model/"
 
-# Create output folders if not existed
-os.makedirs(figure_prepath, exist_ok=True)
-os.makedirs(model_prepath, exist_ok=True)
-
-# Plotting configuration
-figureFrontSize = 12
-figureName_post = "_test.png"
-
 
 # %%
 ### helper labels - fixed
@@ -58,27 +50,7 @@ result_labels = [labels['result']+str(i).zfill(2) for i in range(0,Numchannels)]
 preProcess_labels = [labels['EDFA_input'],labels['EDFA_output']]
 preProcess_labels.extend(inSpectra_labels)
 
-# %%
-# def dB_to_linear(data):
-#   return np.power(10,data/10)
 
-# def linear_TO_Db(data):
-#   result = 10*np.log10(data).to_numpy()
-#   return result[result != -np.inf]
-
-# def linear_TO_Db_full(data):
-#   result = 10*np.log10(data).to_numpy()
-#   result[result == -np.inf] = 0
-#   return result
-
-# def divideZero(numerator,denominator):
-#   with np.errstate(divide='ignore'):
-#     result = numerator / denominator
-#     result[denominator == 0] = 0
-#   return result
-
-# %%
-### PyTorch Loss
 def custom_loss_L2_pytorch(y_pred, y_actual):
     # y_pred, y_actual shape: [batch, channels]
     # turn unloaded y_pred prediction to zero
@@ -101,77 +73,6 @@ def plot_loss(indx,train_losses,val_losses,ingnoreIndex):
     plt.legend()
     plt.grid(True)
 
-# def figure_comp(figIndx,y_test_result,y_pred_result,filename,setFrontSize):
-#     plt.figure(figIndx)
-#     plt.axes(aspect='equal')
-#     plt.scatter(y_test_result, y_pred_result)
-#     plt.xlabel('Measured EDFA Gain (dB)', fontsize=setFrontSize)
-#     plt.ylabel('predicted EDFA Gain (dB)', fontsize=setFrontSize)
-#     minAxis = math.floor(min(y_test_result.min(),y_pred_result.min()) - 0.5)
-#     maxAxis = math.ceil (max(y_test_result.max(),y_pred_result.max()) + 0.5)
-#     limss = [*np.arange(minAxis,maxAxis+1,1)]
-#     lims = [limss[0],limss[-1]]
-#     plt.xlim(lims)
-#     plt.ylim(lims)
-#     plt.plot(lims, lims, 'k--')
-#     plt.xticks(ticks=limss,labels=limss,fontsize=setFrontSize)
-#     plt.yticks(fontsize=setFrontSize)
-#     plt.savefig(figure_prepath+filename, dpi=900)
-
-# def figure_hist(figIndx,error,filename,setFrontSize):
-#     plt.figure(figIndx)
-#     bins_list = [*np.arange(-0.6,0.7,0.1)]
-#     labelList = ['-0.6','','-0.4','','-0.2','','0.0','','0.2','','0.4','','0.6']
-#     plt.hist(error, bins=bins_list)
-#     for i in [-0.2,-0.1,0.1,0.2]: # helper vertical line
-#         plt.axvline(x=i,color='black',ls='--')
-#     plt.xlabel('Prediction Gain Error (dB)', fontsize=setFrontSize)
-#     plt.ylabel('Histogram', fontsize=setFrontSize)
-#     plt.xticks(ticks=bins_list, labels=labelList, fontsize=setFrontSize)
-#     plt.yticks(fontsize=setFrontSize)
-#     plt.savefig(figure_prepath+filename, dpi=900)
-
-# def plot_per_channel_error(y_pred,y_test):
-#     y_pred_result = linear_TO_Db_full(y_pred)
-#     y_test_result = linear_TO_Db_full(y_test)
-#     error = y_test_result - y_pred_result
-#     error_min_0_1s,error_means,error_min_0_2s,within95ranges,mses = [],[],[],[],[]
-#     for j in range(len(error[0])):
-#         error_channel = error[:,j]
-#         error_channel = error_channel[error_channel!=0]
-#         # calculate the distribution
-#         error_reasonable = [i for i in error_channel if abs(i)<=0.2]
-#         error_measureError = [i for i in error_channel if abs(i)<=0.1]
-#         error_min_0_1 = len(error_measureError)/len(error_channel)
-#         error_min_0_2 = len(error_reasonable)/len(error_channel)
-#         error_sorted = np.sort(abs(error_channel))
-#         within95range = error_sorted[int(0.95*len(error_channel))]
-#         mse = (np.square(error_channel)).mean(axis=None)
-#         error_mean = error_channel.mean(axis=None)
-#         error_means.append(error_mean)
-#         error_min_0_1s.append(error_min_0_1)
-#         error_min_0_2s.append(error_min_0_2)
-#         within95ranges.append(within95range)
-#         mses.append(mse)
-#     plt.figure(103)
-#     plt.plot(mses)
-#     plt.xlabel('Channel indices')
-#     plt.ylabel('MSE (dB^2)')
-#     plt.title("Per channel MSE")
-      
-# def getErrorInfo(error):
-#     error_reasonable = [i for i in error if abs(i)<=0.2]
-#     error_measureError = [i for i in error if abs(i)<=0.1]
-#     error_min_0_1 = len(error_measureError)/len(error)
-#     error_min_0_2 = len(error_reasonable)/len(error)
-#     error_sorted = np.sort(abs(error))
-#     within95range = error_sorted[int(0.95*len(error))]
-#     mse = (np.square(error)).mean(axis=None)
-#     return_error_min_0_1 = "{:.2f}".format(error_min_0_1)
-#     return_error_min_0_2 = "{:.2f}".format(error_min_0_2)
-#     return_within95range = "{:.2f}".format(within95range)
-#     return_mse = "{:.2f}".format(mse)
-#     return return_error_min_0_1,return_error_min_0_2,return_within95range,return_mse
 
 
 if __name__ == "__main__":
@@ -191,7 +92,6 @@ if __name__ == "__main__":
     y_train = pd.read_csv(TRAIN_LABEL_PATH)
 
     y_train.fillna(0, inplace=True)
-
 
 
     TrainModelName = model_prepath+args.save_model_name

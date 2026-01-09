@@ -687,7 +687,7 @@ class SpectralCNN(nn.Module):
         if self.training and self.global_noise_std > 0:
             raw_global = raw_global + torch.randn_like(raw_global) * self.global_noise_std
 
-        pos = self.channel_pos.unsqueeze(0).expand(x.size(0), -1)
+        pos = self.channel_pos.to(x.device).unsqueeze(0).expand(x.size(0), -1)
         feat = torch.stack([spectra, wss, pos], dim=1)  # [B, 3, N]
 
         h = self.conv_in(feat)
