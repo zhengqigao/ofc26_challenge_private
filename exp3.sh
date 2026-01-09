@@ -2,7 +2,7 @@
 
 idx=$1
 
-seed_list=(200 201 202)
+seed_list=(400 401 402)
 
 for seed in "${seed_list[@]}"; do
     CUDA_VISIBLE_DEVICES=${idx} python main_zq.py --epochs 10000 --lr 0.001 --save_best --nn_type MymodelAttention --batch_size 64 --seed ${seed}
