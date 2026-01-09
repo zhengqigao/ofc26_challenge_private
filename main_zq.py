@@ -221,7 +221,7 @@ if __name__ == "__main__":
             dropout=0.1,
             spectra_noise_std=0.0,
             global_noise_std=0.0,)
-    elif args.nn_type == "":
+    elif args.nn_type == "ImprovedSpectralTransformer":
         base_model = ImprovedSpectralTransformer(
         input_dim=X_tensor.shape[1],
         output_dim=95,
