@@ -970,7 +970,13 @@ class Mymodel(nn.Module):
         self.wss_embed = nn.Embedding(2, self.hidden_embed_dim)
 
         if use_attention:
-            self.layer = nn.TransformerEncoderLayer(d_model=2 * self.hidden_embed_dim + 1, nhead=4, dim_feedforward = 128, batch_first = True),
+            # Ensure d_model is divisible by nhead; here we use nhead=1
+            self.layer = nn.TransformerEncoderLayer(
+                d_model=2 * self.hidden_embed_dim + 1,
+                nhead=1,
+                dim_feedforward=128,
+                batch_first=True,
+            )
         else:
             self.layer = nn.Sequential(
                 nn.Conv1d(2 * self.hidden_embed_dim + 1, 64, kernel_size=3, padding=1),
