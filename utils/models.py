@@ -958,6 +958,10 @@ class ImprovedEmbedDeepSpectralCNN(nn.Module):
         h = self.conv_mid(h) # [B, hidden_channels, N]
         residual = self.conv_out(h).squeeze(1) # [B, N]
 
+        tmp = base_global[:, 1:2].long()
+        # Check if tmp.long() contains only 0 and -1
+        if not torch.all((tmp.long() == 0) | (tmp.long() == -1)):
+            raise ValueError("tmp.long() contains values other than 0 and -1")
         tilt_embed = self.tilt_embed(base_global[:, 1:2].long())
         # print(f"tilt_embed.shape: {tilt_embed.shape}, channel_pos.shape: {self.channel_pos.shape}")
         base = base_global[:, 0:1] + tilt_embed.view(-1,1) * self.channel_pos.view(1,-1)
