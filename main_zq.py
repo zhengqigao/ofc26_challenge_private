@@ -14,10 +14,9 @@ import torch.optim as optim
 from torch.utils.data import TensorDataset, DataLoader, random_split
 import copy
 from utils.models import *
-# Set seeds
+import random
+
 print("PyTorch version:", torch.__version__)
-torch.manual_seed(256)
-np.random.seed(256)
 
 
 
@@ -36,19 +35,19 @@ model_prepath = f"./model/"
 
 # %%
 ### helper labels - fixed
-Numchannels = 95
-num_inputFeatures = Numchannels * 2 + 4 # target_gain, target_gain_tilt, EDFA_input_power_total, EDFA_output_power_total
-labels = {"gainValue":'target_gain',
-          "EDFA_input":'EDFA_input_power_total',
-          "EDFA_output":'EDFA_output_power_total',
-          "inSpectra":'EDFA_input_spectra_',
-          "WSS":'DUT_WSS_activated_channel_index_',
-          "result":'calculated_gain_spectra_'}
-inSpectra_labels = [labels['inSpectra']+str(i).zfill(2) for i in range(0,Numchannels)]
-onehot_labels = [labels['WSS']+str(i).zfill(2) for i in range(0,Numchannels)]
-result_labels = [labels['result']+str(i).zfill(2) for i in range(0,Numchannels)]
-preProcess_labels = [labels['EDFA_input'],labels['EDFA_output']]
-preProcess_labels.extend(inSpectra_labels)
+# Numchannels = 95
+# num_inputFeatures = Numchannels * 2 + 4 # target_gain, target_gain_tilt, EDFA_input_power_total, EDFA_output_power_total
+# labels = {"gainValue":'target_gain',
+#           "EDFA_input":'EDFA_input_power_total',
+#           "EDFA_output":'EDFA_output_power_total',
+#           "inSpectra":'EDFA_input_spectra_',
+#           "WSS":'DUT_WSS_activated_channel_index_',
+#           "result":'calculated_gain_spectra_'}
+# inSpectra_labels = [labels['inSpectra']+str(i).zfill(2) for i in range(0,Numchannels)]
+# onehot_labels = [labels['WSS']+str(i).zfill(2) for i in range(0,Numchannels)]
+# result_labels = [labels['result']+str(i).zfill(2) for i in range(0,Numchannels)]
+# preProcess_labels = [labels['EDFA_input'],labels['EDFA_output']]
+# preProcess_labels.extend(inSpectra_labels)
 
 
 def custom_loss_L2_pytorch(y_pred, y_actual):
@@ -73,7 +72,14 @@ def plot_loss(indx,train_losses,val_losses,ingnoreIndex):
     plt.legend()
     plt.grid(True)
 
-
+def seed_everything(seed):
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    np.random.seed(seed)
+    random.seed(seed)
+    torch.random.manual_seed(seed)
 
 if __name__ == "__main__":
     
@@ -81,20 +87,23 @@ if __name__ == "__main__":
     parser.add_argument("--lr", type=float, default=0.01)
     parser.add_argument("--epochs", type=int, default=500)
     parser.add_argument("--batch_size", type=int, default=32)
-    parser.add_argument("--save_model_name", type=str, default="model.pt")
+    parser.add_argument("--weight_decay", type=float, default=0.001)
     parser.add_argument("--nn_type", type=str, default="BasicFNN")
-    
+    parser.add_argument("--seed", type=int, default=256)
     parser.add_argument("--save_best", action="store_true", default=False) # default save the model after the last epoch, if save_best is True, save the model when the validation loss is the best
 
     args = parser.parse_args()
+    
+    seed_everything(args.seed)
     
     X_train = pd.read_csv(TRAIN_FEATURE_PATH).iloc[:, 3:]
     y_train = pd.read_csv(TRAIN_LABEL_PATH)
 
     y_train.fillna(0, inplace=True)
 
-
-    TrainModelName = model_prepath+args.save_model_name
+    Numchannels = 95
+    common_suffix = f"_{args.nn_type}_lr{args.lr}_bs{args.batch_size}_ep{args.epochs}_seed{args.seed}"
+    TrainModelName = "./model/" + args.nn_type + common_suffix + ".pt"
 
     # --- Torch: Prepare Data ---
     X_np = X_train.values.astype(np.float32)
@@ -154,7 +163,7 @@ if __name__ == "__main__":
 
     base_model.to(device)
     
-    optimizer = optim.Adam(base_model.parameters(), lr=args.lr)
+    optimizer = optim.AdamW(base_model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
     train_losses = []
     val_losses = []
@@ -198,9 +207,9 @@ if __name__ == "__main__":
 
     if not args.save_best:    
         best_model = base_model # point to the model after the last epoch
-        print(f"Saving {args.nn_type} model after the last epoch")
+        print(f"Saving {args.nn_type} model after the last epoch to {TrainModelName}")
     else:
-        print(f"Saving {args.nn_type} model when the validation loss is the best (val_loss={best_val_loss:.5f})")
+        print(f"Saving {args.nn_type} model when the validation loss is the best (val_loss={best_val_loss:.5f}) to {TrainModelName}")
     
     torch.save(best_model, TrainModelName)
     
@@ -242,5 +251,5 @@ if __name__ == "__main__":
     y_pred.insert(0, kaggle_ID, X_test_full[kaggle_ID].values)
 
     # Save predictions
-    output_path = f"./submission/my_submission_{args.nn_type}.csv"
+    output_path = f"./submission/my_submission_{common_suffix}.csv"
     y_pred.to_csv(output_path, index=False)
