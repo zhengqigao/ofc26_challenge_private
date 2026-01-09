@@ -21,6 +21,7 @@ class BasicFNN(nn.Module):
         )
         
     def forward(self, x):
+        x = x.clone()
         x[:,4::2] = x[:,4::2] / 100 # normalization 
         return self.layers(x)
 
@@ -89,6 +90,7 @@ class GatedBasicFNN(nn.Module):
         )
         
     def forward(self, x):
+        x = x.clone()
         x[:,4::2] = x[:,4::2] / 100 # normalization
         v = torch.cat([x[:,0:4], x[:,4::2]], dim=-1) # shape [batch, 99]
         c = x[:,5::2] # control variable, shape [batch, 95]
@@ -162,10 +164,13 @@ class LinearGateNet(nn.Module):
         self.off_token = nn.Parameter(torch.zeros(v_out_dim))
 
         # ---- Head: concat (global_out_dim, v_out_dim) -> out_dim
-        layer_list = [nn.Linear(global_out_dim + v_out_dim, head_hidden_list[0]), nn.ReLU()]
-        for i in range(len(head_hidden_list)-1):
-            layer_list.append(nn.Linear(head_hidden_list[i], head_hidden_list[i+1]))
-            layer_list.append(nn.ReLU())
+        layer_list = []
+        in_dim = global_out_dim + v_out_dim
+        for i, h_dim in enumerate(head_hidden_list):
+            layer_list.append(nn.Linear(in_dim, h_dim))
+            if i < len(head_hidden_list) - 1:
+                layer_list.append(nn.ReLU())
+            in_dim = h_dim
         self.head = nn.Sequential(*layer_list)
 
     def forward(self, x):
@@ -245,6 +250,7 @@ class ResidualFNN(nn.Module):
         )
         
     def forward(self, x):
+        x = x.clone()
         x[:, 4::2] = x[:, 4::2] / 100  # normalization
         x = self.input_layer(x)
         
@@ -301,6 +307,7 @@ class AttentionFNN(nn.Module):
         )
         
     def forward(self, x):
+        x = x.clone()
         x[:, 4::2] = x[:, 4::2] / 100  # normalization
         
         # 分离全局和通道特征
@@ -363,6 +370,7 @@ class ChannelWiseFNN(nn.Module):
         )
         
     def forward(self, x):
+        x = x.clone()
         x[:, 4::2] = x[:, 4::2] / 100  # normalization
         
         # 全局特征
@@ -410,6 +418,7 @@ class LightweightFNN(nn.Module):
         )
         
     def forward(self, x):
+        x = x.clone()
         x[:, 4::2] = x[:, 4::2] / 100  # normalization
         return self.layers(x)
 
@@ -450,6 +459,7 @@ class HybridFNN(nn.Module):
         ])
         
     def forward(self, x):
+        x = x.clone()
         x[:, 4::2] = x[:, 4::2] / 100  # normalization
         
         # 全局特征
@@ -507,6 +517,7 @@ class DeepResidualFNN(nn.Module):
         )
         
     def forward(self, x):
+        x = x.clone()
         x[:, 4::2] = x[:, 4::2] / 100  # normalization
         x = self.input_proj(x)
         
@@ -518,3 +529,172 @@ class DeepResidualFNN(nn.Module):
             x = nn.functional.relu(x)
         
         return self.output_layer(x)
+
+
+class SpectralTransformer(nn.Module):
+    """
+    Channel-token transformer with global conditioning and residual-on-tilt output.
+    """
+    def __init__(
+        self,
+        input_dim,
+        output_dim,
+        num_channels=95,
+        global_dim=4,
+        embed_dim=64,
+        num_heads=4,
+        num_layers=2,
+        dropout=0.25,
+        ff_mult=2,
+        spectra_noise_std=0.0,
+        global_noise_std=0.0,
+    ):
+        super().__init__()
+        inferred = (input_dim - global_dim) // 2
+        if input_dim != global_dim + inferred * 2:
+            raise ValueError(f"Invalid input_dim: {input_dim} for global_dim={global_dim}.")
+        if inferred != num_channels:
+            num_channels = inferred
+        if output_dim != num_channels:
+            raise ValueError(f"output_dim {output_dim} must match num_channels {num_channels}.")
+
+        self.global_dim = global_dim
+        self.num_channels = num_channels
+        self.spectra_noise_std = spectra_noise_std
+        self.global_noise_std = global_noise_std
+
+        self.global_norm = nn.LayerNorm(global_dim)
+        self.global_mlp = nn.Sequential(
+            nn.Linear(global_dim, embed_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(embed_dim, embed_dim),
+        )
+
+        self.channel_proj = nn.Sequential(
+            nn.Linear(3, embed_dim),
+            nn.LayerNorm(embed_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+        )
+
+        self.pos_emb = nn.Parameter(torch.zeros(num_channels, embed_dim))
+        nn.init.normal_(self.pos_emb, std=0.02)
+
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=embed_dim,
+            nhead=num_heads,
+            dim_feedforward=embed_dim * ff_mult,
+            dropout=dropout,
+            batch_first=True,
+        )
+        self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+
+        self.residual_head = nn.Sequential(
+            nn.Linear(embed_dim, embed_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(embed_dim, 1),
+        )
+
+        self.tilt_scale = nn.Parameter(torch.tensor(1.0))
+        pos = torch.linspace(-0.5, 0.5, steps=num_channels)
+        self.register_buffer("channel_pos", pos, persistent=False)
+
+    def forward(self, x):
+        x = x.clone()
+        raw_global = x[:, :self.global_dim]
+        base_global = raw_global
+        spectra = x[:, self.global_dim::2] / 100
+        wss = x[:, self.global_dim + 1::2]
+
+        if self.training and self.spectra_noise_std > 0:
+            spectra = spectra + torch.randn_like(spectra) * self.spectra_noise_std
+        if self.training and self.global_noise_std > 0:
+            raw_global = raw_global + torch.randn_like(raw_global) * self.global_noise_std
+
+        g_emb = self.global_mlp(self.global_norm(raw_global))
+        pos = self.channel_pos.unsqueeze(0).expand(x.size(0), -1)
+        channel_feat = torch.stack([spectra, wss, pos], dim=-1)
+        tokens = self.channel_proj(channel_feat)
+        tokens = tokens + g_emb.unsqueeze(1) + self.pos_emb.unsqueeze(0)
+        tokens = self.encoder(tokens)
+
+        residual = self.residual_head(tokens).squeeze(-1)
+        base = base_global[:, 0:1] + base_global[:, 1:2] * self.tilt_scale * self.channel_pos
+        return base + residual
+
+
+class SpectralCNN(nn.Module):
+    """
+    Lightweight 1D CNN over channels with global conditioning and residual-on-tilt output.
+    """
+    def __init__(
+        self,
+        input_dim,
+        output_dim,
+        num_channels=95,
+        global_dim=4,
+        hidden_channels=32,
+        dropout=0.2,
+        spectra_noise_std=0.0,
+        global_noise_std=0.0,
+    ):
+        super().__init__()
+        inferred = (input_dim - global_dim) // 2
+        if input_dim != global_dim + inferred * 2:
+            raise ValueError(f"Invalid input_dim: {input_dim} for global_dim={global_dim}.")
+        if inferred != num_channels:
+            num_channels = inferred
+        if output_dim != num_channels:
+            raise ValueError(f"output_dim {output_dim} must match num_channels {num_channels}.")
+
+        self.global_dim = global_dim
+        self.num_channels = num_channels
+        self.spectra_noise_std = spectra_noise_std
+        self.global_noise_std = global_noise_std
+
+        self.global_mlp = nn.Sequential(
+            nn.Linear(global_dim, hidden_channels),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_channels, hidden_channels),
+        )
+
+        self.conv_in = nn.Conv1d(3, hidden_channels, kernel_size=3, padding=1)
+        self.conv_mid = nn.Sequential(
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Conv1d(hidden_channels, hidden_channels, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+        )
+        self.conv_out = nn.Conv1d(hidden_channels, 1, kernel_size=1)
+
+        self.tilt_scale = nn.Parameter(torch.tensor(1.0))
+        pos = torch.linspace(-0.5, 0.5, steps=num_channels)
+        self.register_buffer("channel_pos", pos, persistent=False)
+
+    def forward(self, x):
+        x = x.clone()
+        raw_global = x[:, :self.global_dim]
+        base_global = raw_global
+        spectra = x[:, self.global_dim::2] / 100
+        wss = x[:, self.global_dim + 1::2]
+
+        if self.training and self.spectra_noise_std > 0:
+            spectra = spectra + torch.randn_like(spectra) * self.spectra_noise_std
+        if self.training and self.global_noise_std > 0:
+            raw_global = raw_global + torch.randn_like(raw_global) * self.global_noise_std
+
+        pos = self.channel_pos.unsqueeze(0).expand(x.size(0), -1)
+        feat = torch.stack([spectra, wss, pos], dim=1)  # [B, 3, N]
+
+        h = self.conv_in(feat)
+        g = self.global_mlp(raw_global).unsqueeze(-1)
+        h = h + g
+        h = self.conv_mid(h)
+        residual = self.conv_out(h).squeeze(1)
+
+        base = base_global[:, 0:1] + base_global[:, 1:2] * self.tilt_scale * self.channel_pos
+        return base + residual
