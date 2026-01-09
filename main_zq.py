@@ -173,6 +173,13 @@ if __name__ == "__main__":
             hidden_embed_dim=2,
             token_model="conv",
         ).to(device)
+    elif args.nn_type == "MymodelMix":
+        base_model = Mymodel(
+            global_dim=4,
+            numchannel=95,
+            hidden_embed_dim=2,
+            token_model="mix",
+        ).to(device)
     elif args.nn_type == "SpectralCNN":
         base_model = SpectralCNN(
             X_tensor.shape[1],
