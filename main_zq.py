@@ -166,6 +166,16 @@ if __name__ == "__main__":
             dropout=0.1,
             spectra_noise_std=0.0,
             global_noise_std=0.0,)
+    elif args.nn_type == "ImprovedDeepSpectralCNN":
+        base_model = ImprovedDeepSpectralCNN(
+            X_tensor.shape[1],
+            output_dim = 95,
+            num_channels = 95,
+            global_dim=4,
+            hidden_channels=32,
+            dropout=0.1,
+            spectra_noise_std=0.0,
+            global_noise_std=0.0,)
     else:
         raise ValueError(f"Invalid nn_type: {args.nn_type}.")
 
