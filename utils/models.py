@@ -1055,4 +1055,221 @@ class Mymodel(nn.Module):
         
         result = base + residual
         return result
+
+
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+class StochasticDepth(nn.Module):
+    """Stochastic Depth for regularization."""
+    def __init__(self, drop_prob=0.1):
+        super().__init__()
+        self.drop_prob = drop_prob
+
+    def forward(self, x, residual):
+        if not self.training or self.drop_prob == 0:
+            return x + residual
+        keep_prob = 1 - self.drop_prob
+        mask = torch.rand(x.size(0), 1, 1, device=x.device) < keep_prob
+        return x + residual * mask / keep_prob
+
+
+class GatedChannelProjection(nn.Module):
+    """Channel projection with WSS-based gating."""
+    def __init__(self, embed_dim, dropout=0.25):
+        super().__init__()
+        # WSS embedding (0 or 1)
+        self.wss_embed = nn.Embedding(2, embed_dim // 4)
         
+        # Projection for spectra + position
+        self.spectra_proj = nn.Linear(2, embed_dim)
+        
+        # Gate network conditioned on WSS
+        self.gate = nn.Sequential(
+            nn.Linear(embed_dim // 4, embed_dim // 2),
+            nn.ReLU(),
+            nn.Linear(embed_dim // 2, embed_dim),
+            nn.Sigmoid()
+        )
+        
+        self.norm = nn.LayerNorm(embed_dim)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, spectra, wss, pos):
+        # wss is 0 or 1, convert to long for embedding
+        wss_idx = wss.long()
+        wss_emb = self.wss_embed(wss_idx)  # [B, C, embed_dim//4]
+        
+        # Project spectra and position
+        spectra_feat = torch.stack([spectra, pos], dim=-1)
+        proj = self.spectra_proj(spectra_feat)  # [B, C, embed_dim]
+        
+        # Generate gate from WSS
+        gate = self.gate(wss_emb)  # [B, C, embed_dim]
+        
+        # Apply gating
+        gated = proj * (0.5 + 0.5 * gate)  # Gate范围[0.5, 1.0]避免完全关闭
+        
+        return self.dropout(self.norm(gated))
+
+
+class FiLMLayer(nn.Module):
+    """Feature-wise Linear Modulation conditioned on global features."""
+    def __init__(self, num_features, cond_dim):
+        super().__init__()
+        self.scale = nn.Linear(cond_dim, num_features)
+        self.shift = nn.Linear(cond_dim, num_features)
+        
+    def forward(self, x, cond):
+        # x: [B, C, D], cond: [B, cond_dim]
+        scale = self.scale(cond).unsqueeze(1)  # [B, 1, D]
+        shift = self.shift(cond).unsqueeze(1)  # [B, 1, D]
+        return x * (1 + scale) + shift
+
+
+class ImprovedSpectralTransformer(nn.Module):
+    """
+    Enhanced channel-token transformer with:
+    - WSS embedding and gating
+    - Stochastic depth
+    - FiLM conditioning
+    - Channel importance weighting
+    """
+    def __init__(
+        self,
+        input_dim,
+        output_dim,
+        num_channels=95,
+        global_dim=4,
+        embed_dim=64,
+        num_heads=4,
+        num_layers=2,
+        dropout=0.25,
+        ff_mult=2,
+        spectra_noise_std=0.0,
+        global_noise_std=0.0,
+        stochastic_depth_prob=0.1,  # 新增
+        use_channel_weighting=True,  # 新增
+    ):
+        super().__init__()
+        inferred = (input_dim - global_dim) // 2
+        if input_dim != global_dim + inferred * 2:
+            raise ValueError(f"Invalid input_dim: {input_dim} for global_dim={global_dim}.")
+        if inferred != num_channels:
+            num_channels = inferred
+        if output_dim != num_channels:
+            raise ValueError(f"output_dim {output_dim} must match num_channels {num_channels}.")
+
+        self.global_dim = global_dim
+        self.num_channels = num_channels
+        self.spectra_noise_std = spectra_noise_std
+        self.global_noise_std = global_noise_std
+        self.use_channel_weighting = use_channel_weighting
+
+        # Global conditioning
+        self.global_norm = nn.LayerNorm(global_dim)
+        self.global_mlp = nn.Sequential(
+            nn.Linear(global_dim, embed_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(embed_dim, embed_dim),
+        )
+
+        # Improved channel projection with WSS gating
+        self.channel_proj = GatedChannelProjection(embed_dim, dropout)
+
+        # Learnable positional embedding
+        self.pos_emb = nn.Parameter(torch.zeros(num_channels, embed_dim))
+        nn.init.normal_(self.pos_emb, std=0.02)
+
+        # FiLM conditioning layers
+        self.film_layers = nn.ModuleList([
+            FiLMLayer(embed_dim, embed_dim) for _ in range(num_layers)
+        ])
+
+        # Transformer encoder with stochastic depth
+        encoder_layers = []
+        for _ in range(num_layers):
+            layer = nn.TransformerEncoderLayer(
+                d_model=embed_dim,
+                nhead=num_heads,
+                dim_feedforward=embed_dim * ff_mult,
+                dropout=dropout,
+                batch_first=True,
+            )
+            encoder_layers.append(layer)
+        self.encoder_layers = nn.ModuleList(encoder_layers)
+        
+        # Stochastic depth
+        self.stochastic_depths = nn.ModuleList([
+            StochasticDepth(stochastic_depth_prob * (i + 1) / num_layers)
+            for i in range(num_layers)
+        ])
+
+        # Channel importance weighting (learnable per-channel scale)
+        if use_channel_weighting:
+            self.channel_weights = nn.Parameter(torch.ones(num_channels))
+        else:
+            self.register_buffer('channel_weights', torch.ones(num_channels))
+
+        # Output head
+        self.residual_head = nn.Sequential(
+            nn.Linear(embed_dim, embed_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(embed_dim, 1),
+        )
+
+        self.tilt_scale = nn.Parameter(torch.tensor(1.0))
+        pos = torch.linspace(-0.5, 0.5, steps=num_channels)
+        self.register_buffer("channel_pos", pos, persistent=False)
+
+    def forward(self, x):
+        x = x.clone()
+        raw_global = x[:, :self.global_dim]
+        base_global = raw_global
+        spectra = x[:, self.global_dim::2] / 100
+        wss = x[:, self.global_dim + 1::2]
+
+        # Data augmentation with noise
+        if self.training and self.spectra_noise_std > 0:
+            spectra = spectra + torch.randn_like(spectra) * self.spectra_noise_std
+        if self.training and self.global_noise_std > 0:
+            raw_global = raw_global + torch.randn_like(raw_global) * self.global_noise_std
+
+        # Global embedding
+        g_emb = self.global_mlp(self.global_norm(raw_global))
+        
+        # Channel tokens with WSS-gated projection
+        pos = self.channel_pos.unsqueeze(0).expand(x.size(0), -1)
+        tokens = self.channel_proj(spectra, wss, pos)
+        
+        # Add positional embedding and global conditioning
+        tokens = tokens + self.pos_emb.unsqueeze(0)
+
+        # Transformer layers with FiLM and stochastic depth
+        for i, (layer, film, sd) in enumerate(
+            zip(self.encoder_layers, self.film_layers, self.stochastic_depths)
+        ):
+            # FiLM conditioning before transformer layer
+            tokens_cond = film(tokens, g_emb)
+            
+            # Transformer layer
+            tokens_new = layer(tokens_cond)
+            
+            # Stochastic depth residual connection
+            tokens = sd(tokens, tokens_new - tokens_cond)
+
+        # Apply channel importance weighting
+        if self.use_channel_weighting:
+            weights = torch.sigmoid(self.channel_weights)  # Ensure positive
+            tokens = tokens * weights.unsqueeze(0).unsqueeze(-1)
+
+        # Predict residuals
+        residual = self.residual_head(tokens).squeeze(-1)
+        
+        # Base tilt + residual
+        base = base_global[:, 0:1] + base_global[:, 1:2] * self.tilt_scale * self.channel_pos
+        return base + residual
