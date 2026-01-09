@@ -146,6 +146,20 @@ if __name__ == "__main__":
         base_model = HybridFNN(X_tensor.shape[1], Numchannels).to(device)
     elif args.nn_type == "DeepResidualFNN":
         base_model = DeepResidualFNN(X_tensor.shape[1], Numchannels).to(device)
+    elif args.nn_type == "SpectralTransformer":
+        base_model = SpectralTransformer(
+        X_tensor.shape[1],
+        Numchannels,
+        num_channels=95,
+        global_dim=4,
+        embed_dim=64,
+        num_heads=4,
+        num_layers=2,
+        dropout=0.1,
+        ff_mult=2,
+        spectra_noise_std=0.0,
+        global_noise_std=0.0,)
+
     elif args.nn_type == "SpectralCNN":
         base_model = SpectralCNN(
             X_tensor.shape[1],
