@@ -971,7 +971,6 @@ class Mymodel(nn.Module):
         self.wss_embed = nn.Embedding(2, self.hidden_embed_dim)
         self.num_layers = num_layers
         if token_model == "attention":
-            # Ensure d_model is divisible by nhead; here we use nhead=1
             enc_layer = nn.TransformerEncoderLayer(
                     d_model=hidden_dim,
                     nhead=4,
