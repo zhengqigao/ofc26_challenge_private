@@ -930,6 +930,9 @@ class ImprovedEmbedDeepSpectralCNN(nn.Module):
 
         self.wss_embed = nn.Embedding(2, hidden_embed_dim)
         self.tilt_embed = nn.Embedding(2, 1)
+        with torch.no_grad():
+            self.tilt_embed.weight.zero_()
+
         pos = torch.linspace(-0.5, 0.5, steps=num_channels)
         self.register_buffer("channel_pos", pos, persistent=False)
 
@@ -950,7 +953,7 @@ class ImprovedEmbedDeepSpectralCNN(nn.Module):
 
         pos = self.channel_pos.to(x.device).unsqueeze(0).expand(x.size(0), -1)
         feat = torch.cat([spectra.unsqueeze(1), wss_embed, pos.unsqueeze(1)], dim=1)  # [B, 2 + hidden_embed_dim, N]
-        # print(f"feat.shape: {feat.shape}")        
+        
         h = self.conv_in(feat) # [B, hidden_channels, N]
         g = self.global_mlp(raw_global).unsqueeze(-1)
         h = h + g # [B, hidden_channels, N]
@@ -958,11 +961,7 @@ class ImprovedEmbedDeepSpectralCNN(nn.Module):
         h = self.conv_mid(h) # [B, hidden_channels, N]
         residual = self.conv_out(h).squeeze(1) # [B, N]
 
-        tmp = (base_global[:, 1:2] + 1).long()
-        # Check if tmp.long() contains only 0 and -1
-        if not torch.all((tmp.long() == 0) | (tmp.long() == 1)):
-            raise ValueError("tmp.long() contains values other than 0 and 1")
+        tmp = (-base_global[:, 1:2]).long()
         tilt_embed = self.tilt_embed(tmp)
-        # print(f"tilt_embed.shape: {tilt_embed.shape}, channel_pos.shape: {self.channel_pos.shape}")
         base = base_global[:, 0:1] + tilt_embed.view(-1,1) * self.channel_pos.view(1,-1)
         return base + residual
