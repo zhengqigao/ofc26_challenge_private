@@ -1,11 +1,49 @@
 #!/bin/bash
 
-idx=$1
+# Exit immediately if any command fails
+set -e
 
-seed_list=(300 301 302)
+# Check if enough arguments are passed
+if [ $# -lt 4 ]; then
+    echo "Usage: $0 <gpu_idx> <hidden_embed_dim> <hidden_dim> <num_layers>"
+    exit 1
+fi
 
-for seed in "${seed_list[@]}"; do
-    CUDA_VISIBLE_DEVICES=${idx} python main_zq.py --epochs 10000 --lr 0.001 --save_best --nn_type MymodelAttention --batch_size 64 --seed ${seed}
+idx="$1"
+hidden_embed_dim="$2"
+hidden_dim="$3"
+num_layers="$4"
+
+# Array of seeds
+seeds=(200 201 202)
+
+# 1. Runs with lr=0.001, no scheduler
+for seed in "${seeds[@]}"; do
+    CUDA_VISIBLE_DEVICES="${idx}" python main_zq.py \
+        --epochs 20000 \
+        --lr 0.001 \
+        --save_best \
+        --nn_type MymodelAttention \
+        --batch_size 64 \
+        --seed "${seed}" \
+        --hidden_embed_dim "${hidden_embed_dim}" \
+        --hidden_dim "${hidden_dim}" \
+        --num_layers "${num_layers}"
 done
 
-python kaggle_submit.py
+# 2. Runs with lr=0.005, cosine scheduler
+for seed in "${seeds[@]}"; do
+    CUDA_VISIBLE_DEVICES="${idx}" python main_zq.py \
+        --epochs 20000 \
+        --lr 0.005 \
+        --save_best \
+        --nn_type MymodelAttention \
+        --batch_size 64 \
+        --seed "${seed}" \
+        --hidden_embed_dim "${hidden_embed_dim}" \
+        --hidden_dim "${hidden_dim}" \
+        --num_layers "${num_layers}" \
+        --lr_scheduler cosine \
+        --scheduler_eta_min 0.0001
+done
+

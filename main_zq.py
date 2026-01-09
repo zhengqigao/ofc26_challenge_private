@@ -19,8 +19,7 @@ import random
 print("PyTorch version:", torch.__version__)
 
 
-
-#%%
+# %%
 # Full paths to training data
 TRAIN_FEATURE_PATH = f"./data/train_features.csv"
 TRAIN_LABEL_PATH   = f"./data/train_labels.csv"
@@ -81,6 +80,33 @@ def seed_everything(seed):
     random.seed(seed)
     torch.random.manual_seed(seed)
 
+# ---- 统一的Scheduler工厂函数 ----
+def get_scheduler(optimizer, scheduler_type, epochs, **kwargs):
+    """
+    Returns the specified learning rate scheduler.
+    Args:
+        optimizer: torch optimizer
+        scheduler_type: str, e.g. 'none', 'step', 'cosine'
+        epochs: int, total epochs
+        **kwargs: extra args for scheduler
+    """
+    scheduler_type = scheduler_type.lower()
+    if scheduler_type == "none":
+        return None
+    elif scheduler_type == "step":
+        # StepLR, default 100 step, gamma=0.5, 可配置
+        step_size = kwargs.get("step_size", 100)
+        gamma = kwargs.get("gamma", 0.5)
+        return optim.lr_scheduler.StepLR(optimizer, step_size=step_size, gamma=gamma)
+    elif scheduler_type == "cosine":
+        # CosineAnnealingLR
+        T_max = kwargs.get("t_max", epochs)
+        eta_min = kwargs.get("eta_min", 0)
+        return optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=T_max, eta_min=eta_min)
+    else:
+        raise ValueError(f"Unsupported lr_scheduler: {scheduler_type}")
+    # 可在这里扩展其它类型
+
 if __name__ == "__main__":
     
     parser = argparse.ArgumentParser()
@@ -91,6 +117,20 @@ if __name__ == "__main__":
     parser.add_argument("--nn_type", type=str, default="BasicFNN")
     parser.add_argument("--seed", type=int, default=256)
     parser.add_argument("--save_best", action="store_true", default=False) # default save the model after the last epoch, if save_best is True, save the model when the validation loss is the best
+    
+    parser.add_argument("--hidden_embed_dim", type=int, default=2)
+    parser.add_argument("--hidden_dim", type=int, default=64)
+    parser.add_argument("--num_layers", type=int, default=3)
+    
+    # 新增lr scheduler相关参数
+    parser.add_argument("--lr_scheduler", type=str, default="none", choices=["none","step","cosine"], 
+                        help="选择lr scheduler策略：none/step/cosine (可扩展类型)")
+    parser.add_argument("--scheduler_step_size", type=int, default=100, 
+                        help="StepLR: 每多少epoch衰减")
+    parser.add_argument("--scheduler_gamma", type=float, default=0.5, 
+                        help="StepLR: 衰减系数")
+    parser.add_argument("--scheduler_eta_min", type=float, default=0,
+                        help="CosineAnnealingLR: 最小lr")
 
     args = parser.parse_args()
     
@@ -102,7 +142,7 @@ if __name__ == "__main__":
     y_train.fillna(0, inplace=True)
 
     Numchannels = 95
-    common_suffix = f"_{args.nn_type}_lr{args.lr}_bs{args.batch_size}_ep{args.epochs}_seed{args.seed}"
+    common_suffix = f"_{args.nn_type}_lr{args.lr}_bs{args.batch_size}_ep{args.epochs}_seed{args.seed}_hidden_embed_dim{args.hidden_embed_dim}_hidden_dim{args.hidden_dim}_num_layers{args.num_layers}_lr_scheduler{args.lr_scheduler}_scheduler_step_size{args.scheduler_step_size}_scheduler_gamma{args.scheduler_gamma}_scheduler_eta_min{args.scheduler_eta_min}"
     TrainModelName = "./model/" + args.nn_type + common_suffix + ".pt"
 
     # --- Torch: Prepare Data ---
@@ -163,8 +203,9 @@ if __name__ == "__main__":
         base_model = Mymodel(
             global_dim=4,
             numchannel=95,
-            hidden_embed_dim=2,
-            num_layers=3,
+            hidden_embed_dim=args.hidden_embed_dim,
+            hidden_dim=args.hidden_dim,
+            num_layers=args.num_layers,
             token_model="attention",
         ).to(device)
     elif args.nn_type == "MymodelConv":
@@ -237,6 +278,17 @@ if __name__ == "__main__":
 
     optimizer = optim.AdamW(base_model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
+    # === 新增 lr_scheduler 构建 ===
+    scheduler_kwargs = {}
+    if args.lr_scheduler == "step":
+        scheduler_kwargs = {'step_size': args.scheduler_step_size, 'gamma': args.scheduler_gamma}
+    if args.lr_scheduler == "cosine":
+        scheduler_kwargs = {'t_max': args.epochs, 'eta_min': args.scheduler_eta_min}
+
+    lr_scheduler = get_scheduler(optimizer, args.lr_scheduler, args.epochs, **scheduler_kwargs)
+    if lr_scheduler is not None:
+        print(f"Using lr_scheduler: {args.lr_scheduler}")
+
     train_losses = []
     val_losses = []
     best_val_loss = float('inf')
@@ -276,6 +328,14 @@ if __name__ == "__main__":
             if val_losses[-1] < best_val_loss:
                 best_val_loss = val_losses[-1]
                 best_model = copy.deepcopy(base_model)
+
+        # === 更新lr scheduler ===
+        if lr_scheduler is not None:
+            lr_scheduler.step()
+            # 可打印当前lr
+            if epoch % 100 == 0 or epoch == args.epochs - 1:
+                current_lr = optimizer.param_groups[0]['lr']
+                print(f"Epoch {epoch+1} lr: {current_lr:.6f}")
 
     if not args.save_best:    
         best_model = base_model # point to the model after the last epoch
