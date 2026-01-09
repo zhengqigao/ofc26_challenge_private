@@ -961,7 +961,7 @@ class ImprovedEmbedDeepSpectralCNN(nn.Module):
         h = self.conv_mid(h) # [B, hidden_channels, N]
         residual = self.conv_out(h).squeeze(1) # [B, N]
 
-        tmp = (-base_global[:, 1:2]).long()
+        tmp = (base_global[:, 1:2] < -0.5).long()
         tilt_embed = self.tilt_embed(tmp)
         base = base_global[:, 0:1] + tilt_embed.view(-1,1) * self.channel_pos.view(1,-1)
         return base + residual
