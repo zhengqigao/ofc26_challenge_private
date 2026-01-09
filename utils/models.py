@@ -903,19 +903,8 @@ class ImprovedEmbedDeepSpectralCNN(nn.Module):
             nn.Linear(hidden_channels, hidden_channels),
         )
 
-        self.conv_in = nn.Sequential(
-            nn.Conv1d(2 + hidden_embed_dim, hidden_channels, kernel_size=3, padding=1),
-            nn.SiLU(),
-            nn.Dropout(dropout),
-            nn.Conv1d(hidden_channels, hidden_channels, kernel_size=3, padding=1),
-            nn.SiLU(),
-            nn.Dropout(dropout),
-        )
-        
+        self.conv_in = nn.Conv1d(3, hidden_channels, kernel_size=3, padding=1)
         self.conv_mid = nn.Sequential(
-            nn.SiLU(),
-            nn.Dropout(dropout),
-            nn.Conv1d(hidden_channels, hidden_channels, kernel_size=3, padding=1),
             nn.SiLU(),
             nn.Dropout(dropout),
             nn.Conv1d(hidden_channels, hidden_channels, kernel_size=3, padding=1),
@@ -925,6 +914,7 @@ class ImprovedEmbedDeepSpectralCNN(nn.Module):
         self.conv_out = nn.Sequential(
             nn.Conv1d(hidden_channels, hidden_channels // 2, kernel_size=1),
             nn.SiLU(),
+            nn.Dropout(dropout),
             nn.Conv1d(hidden_channels // 2, 1, kernel_size=1),
         )
 
