@@ -358,9 +358,9 @@ def resolve_defaults(args):
     def default_if_none(value, default):
         return default if value is None else value
 
-    is_spectral = args.nn_type in {"SpectralTransformer", "SpectralCNN"}
+    
 
-    if is_spectral:
+    if args.nn_type == "SpectralTransformer":
         args.loss_type = default_if_none(args.loss_type, "masked_huber")
         args.smooth_lambda = default_if_none(args.smooth_lambda, 0.05)
         args.spectra_noise_std = default_if_none(args.spectra_noise_std, 0.01)
