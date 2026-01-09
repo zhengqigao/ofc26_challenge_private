@@ -152,6 +152,8 @@ if __name__ == "__main__":
                            "AttentionFNN", "ChannelWiseFNN", "LightweightFNN", "HybridFNN", "DeepResidualFNN", "SpectralCNN"]
         raise ValueError(f"Invalid nn_type: {args.nn_type}. Available: {', '.join(available_models)}")
 
+    base_model.to(device)
+    
     optimizer = optim.Adam(base_model.parameters(), lr=args.lr)
 
     train_losses = []
