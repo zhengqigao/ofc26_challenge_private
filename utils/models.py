@@ -953,7 +953,7 @@ class ImprovedEmbedDeepSpectralCNN(nn.Module):
         return base + residual
     
 class Mymodel(nn.Module):
-    def __init__(self, global_dim = 4, numchannel = 95, hidden_embed_dim = 4, hidden_dim = 64, token_model = "conv"):
+    def __init__(self, global_dim = 4, numchannel = 95, hidden_embed_dim = 4, hidden_dim = 64, num_layers = 2, token_model = "conv"):
         super().__init__()
         self.global_dim = 4
         self.numchannel = 95
@@ -969,47 +969,25 @@ class Mymodel(nn.Module):
             nn.Linear(2, self.hidden_embed_dim),
         )
         self.wss_embed = nn.Embedding(2, self.hidden_embed_dim)
-
+        self.num_layers = num_layers
         if token_model == "attention":
             # Ensure d_model is divisible by nhead; here we use nhead=1
-            self.layer = nn.Sequential(
-                nn.Linear(2 * self.hidden_embed_dim + 1, hidden_dim),
-                nn.TransformerEncoderLayer(
-                d_model=hidden_dim,
-                nhead=4,
-                dim_feedforward=hidden_dim,
-                batch_first=True,
-            ),
-                nn.SiLU(),
-                nn.TransformerEncoderLayer(
-                d_model=hidden_dim,
-                nhead=4,
-                dim_feedforward=hidden_dim,
-                batch_first=True,
-            ),
-                )
+            self.layer = [nn.Linear(2 * self.hidden_embed_dim + 1, hidden_dim)]
+            for _ in range(self.num_layers):
+                self.layer.append(nn.TransformerEncoderLayer(
+                    d_model=hidden_dim,
+                    nhead=4,
+                    dim_feedforward=hidden_dim,
+                    batch_first=True,
+                ))
+            self.layer.append(nn.SiLU())
+            self.layer = nn.Sequential(*self.layer)
         elif token_model == "conv":
-            self.layer = nn.Sequential(
-                nn.Conv1d(2 * self.hidden_embed_dim + 1, hidden_dim, kernel_size=3, padding=1),
-                nn.SiLU(),
-                nn.Conv1d(hidden_dim, hidden_dim, kernel_size=3, padding=1),
-            )    
-        elif token_model == 'mix':
-            self.cnn_layer = nn.Sequential(
-                nn.Conv1d(2 * self.hidden_embed_dim + 1, hidden_dim, kernel_size=3, padding=1),
-                nn.SiLU(),
-                nn.Conv1d(hidden_dim, hidden_dim, kernel_size=3, padding=1),
-            )    
-            self.attn_layer = nn.Sequential(
-                nn.Linear(2 * self.hidden_embed_dim + 1, hidden_dim),
-                nn.TransformerEncoderLayer(
-                d_model=hidden_dim,
-                nhead=4,
-                dim_feedforward=hidden_dim,
-                batch_first=True,
-            ),
-                )
-            self.scale = nn.Parameter(torch.tensor(1.0))
+            self.layer = [nn.Conv1d(2 * self.hidden_embed_dim + 1, hidden_dim, kernel_size=3, padding=1)]
+            for _ in range(self.num_layers - 1):
+                self.layer.append(nn.Conv1d(hidden_dim, hidden_dim, kernel_size=3, padding=1))
+            self.layer.append(nn.SiLU())
+            self.layer = nn.Sequential(*self.layer)
         else:
             raise ValueError(f"Invalid token_model: {self.token_model}")
         

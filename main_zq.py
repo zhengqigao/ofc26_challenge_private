@@ -164,6 +164,7 @@ if __name__ == "__main__":
             global_dim=4,
             numchannel=95,
             hidden_embed_dim=2,
+            num_layers=4,
             token_model="attention",
         ).to(device)
     elif args.nn_type == "MymodelConv":
@@ -172,13 +173,6 @@ if __name__ == "__main__":
             numchannel=95,
             hidden_embed_dim=2,
             token_model="conv",
-        ).to(device)
-    elif args.nn_type == "MymodelMix":
-        base_model = Mymodel(
-            global_dim=4,
-            numchannel=95,
-            hidden_embed_dim=2,
-            token_model="mix",
         ).to(device)
     elif args.nn_type == "SpectralCNN":
         base_model = SpectralCNN(
