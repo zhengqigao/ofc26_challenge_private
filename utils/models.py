@@ -976,7 +976,7 @@ class Mymodel(nn.Module):
                 nn.Linear(2 * self.hidden_embed_dim + 1, hidden_dim),
                 nn.TransformerEncoderLayer(
                 d_model=hidden_dim,
-                nhead=1,
+                nhead=4,
                 dim_feedforward=hidden_dim,
                 batch_first=True,
             ),
@@ -986,8 +986,25 @@ class Mymodel(nn.Module):
                 nn.Conv1d(2 * self.hidden_embed_dim + 1, hidden_dim, kernel_size=3, padding=1),
                 nn.SiLU(),
                 nn.Conv1d(hidden_dim, hidden_dim, kernel_size=3, padding=1),
-                nn.SiLU(),
             )    
+        elif token_model == 'mix':
+            self.cnn_layer = nn.Sequential(
+                nn.Conv1d(2 * self.hidden_embed_dim + 1, hidden_dim, kernel_size=3, padding=1),
+                nn.SiLU(),
+                nn.Conv1d(hidden_dim, hidden_dim, kernel_size=3, padding=1),
+            )    
+            self.attn_layer = nn.Sequential(
+                nn.Linear(2 * self.hidden_embed_dim + 1, hidden_dim),
+                nn.TransformerEncoderLayer(
+                d_model=hidden_dim,
+                nhead=4,
+                dim_feedforward=hidden_dim,
+                batch_first=True,
+            ),
+                )
+            self.scale = nn.Parameter(torch.tensor(1.0))
+        else:
+            raise ValueError(f"Invalid token_model: {self.token_model}")
         
         self.global_proj = nn.Sequential(
             nn.Linear(self.global_dim, hidden_dim),
@@ -997,7 +1014,9 @@ class Mymodel(nn.Module):
         )
         
         self.final_proj = nn.Sequential(
-            nn.Conv1d(hidden_dim, 1, kernel_size=1),
+            nn.Linear(hidden_dim, self.hidden_dim),
+            nn.SiLU(),
+            nn.Linear(self.hidden_dim,1),
         )
     def forward(self, x):
         base_global = x[:, :self.global_dim] # [B, 4]
@@ -1014,11 +1033,16 @@ class Mymodel(nn.Module):
             output = self.layer(feat) # [B, 95, hidden_dim]
         elif self.token_model == "conv":
             output = self.layer(feat.transpose(1, 2)).transpose(1, 2) # [B, 95, hidden_dim]
-
+        elif self.token_model == 'mix':
+            cnn_output = self.cnn_layer(feat.transpose(1, 2)).transpose(1, 2) # [B, 95, hidden_dim]
+            attn_output = self.attn_layer(feat) # [B, 95, hidden_dim]
+            output = cnn_output + self.scale * attn_output # [B, 95, hidden_dim]
+        else:
+            raise ValueError(f"Invalid token_model: {self.token_model}")
 
         g = self.global_proj(base_global).unsqueeze(1) # [B, 1, hidden_dim]
         residual = output + g # [B, 95, hidden_dim]
-        residual = self.final_proj(residual.transpose(1, 2)).squeeze(1) # [B, 95]
+        residual = self.final_proj(residual).squeeze(-1) # [B, 95]
         
         base = base_global[:, 0:1] + self.tilt_scale * base_global[:, 1:2].view(-1,1) * self.channel_pos.view(1,-1) # [B, 95]
         
