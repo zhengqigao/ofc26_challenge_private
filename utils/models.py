@@ -834,7 +834,7 @@ class ImprovedDeepSpectralCNN(nn.Module):
         self.conv_out = nn.Sequential(
             nn.Conv1d(hidden_channels, hidden_channels // 2, kernel_size=1),
             nn.SiLU(),
-            nn.Linear(hidden_channels // 2, 1),
+            nn.Conv1d(hidden_channels // 2, 1, kernel_size=1),
         )
 
         self.tilt_scale = nn.Parameter(torch.tensor(1.0))
