@@ -10,6 +10,7 @@ import torch.optim as optim
 from sklearn.model_selection import KFold, GroupKFold
 from sklearn.preprocessing import StandardScaler
 from torch.utils.data import DataLoader, TensorDataset
+from utils.helper import seed_everything
 
 from utils.models import (
     AttentionFNN,
@@ -27,8 +28,7 @@ from utils.models import (
 
 # Reproducibility
 print("PyTorch version:", torch.__version__)
-torch.manual_seed(256)
-np.random.seed(256)
+
 
 # Paths
 TRAIN_FEATURE_PATH = "./data/train_features.csv"
@@ -462,6 +462,8 @@ def parse_args():
     parser.add_argument("--cnn_channels", type=int, default=None)
     parser.add_argument("--cnn_dropout", type=float, default=None)
 
+    parser.add_argument("--seed", type=int, default=42)
+    
     return parser.parse_args()
 
 
@@ -471,6 +473,8 @@ def parse_args():
 
 def main():
     args = resolve_defaults(parse_args())
+
+    seed_everything(args.seed)
 
     # Load data
     X_train_full = pd.read_csv(TRAIN_FEATURE_PATH)
