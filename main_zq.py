@@ -159,7 +159,20 @@ if __name__ == "__main__":
         ff_mult=2,
         spectra_noise_std=0.0,
         global_noise_std=0.0,)
-
+    elif args.nn_type == "MymodelAttention":
+        base_model = Mymodel(
+            global_dim=4,
+            numchannel=95,
+            hidden_embed_dim=2,
+            use_attention=True,
+        ).to(device)
+    elif args.nn_type == "MymodelConv":
+        base_model = Mymodel(
+            global_dim=4,
+            numchannel=95,
+            hidden_embed_dim=2,
+            use_attention=False,
+        ).to(device)
     elif args.nn_type == "SpectralCNN":
         base_model = SpectralCNN(
             X_tensor.shape[1],
