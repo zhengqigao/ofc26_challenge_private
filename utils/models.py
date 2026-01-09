@@ -951,3 +951,59 @@ class ImprovedEmbedDeepSpectralCNN(nn.Module):
 
         base = base_global[:, 0:1] + self.tilt_scale * base_global[:, 1:2].view(-1,1) * self.channel_pos.view(1,-1)
         return base + residual
+    
+class Mymodel(nn.Module):
+    def __init(self,global_dim = 4, numchannel = 95, hidden_embed_dim = 4, use_attention = False):
+        super().__init__()
+        self.global_dim = 4
+        self.numchannel = 95
+        self.hidden_embed_dim = 4
+        self.use_attention = use_attention
+        
+        self.channel_pos = nn.Parameter(torch.linspace(-0.5, 0.5, steps=self.numchannel))
+        self.tilt_scale = nn.Parameter(torch.tensor(1.0))
+        self.spectral_embed = nn.Sequential(
+            nn.Linear(1, 2),
+            nn.SiLU(),
+            nn.Linear(2, self.hidden_embed_dim),
+        )
+        self.wss_embed = nn.Embedding(2, self.hidden_embed_dim)
+
+        if use_attention:
+            self.layer = nn.TransformerEncoderLayer(d_model=2 * self.hidden_embed_dim + 1, nhead=4, dim_feedforward = 128, batch_first = True),
+        else:
+            self.layer = nn.Sequential(
+                nn.Conv1d(2 * self.hidden_embed_dim + 1, 64, kernel_size=3, padding=1),
+                nn.SiLU(),
+                nn.Conv1d(64, 64, kernel_size=3, padding=1),
+                nn.SiLU(),
+            )    
+        
+        self.global_proj = nn.Sequential(
+            nn.Linear(self.global_dim, 64),
+            nn.SiLU(),
+            nn.Linear(64, 64),
+            nn.SiLU(),
+        )
+        
+    def forward(self, x):
+        base_global = x[:, :self.global_dim] # [B, 4]
+        spectra = x[:, self.global_dim::2] / 100 # [B, 95]
+        wss = x[:, self.global_dim + 1::2] # [B, 95]
+        
+        spectral_embed = self.spectral_embed(spectra.unsqueeze(-1)) # [B, 95, hidden_embed_dim]
+        wss_embed = self.wss_embed(wss.long()) # [B, 95, hidden_embed_dim]
+        pos_embed = self.channel_pos.to(x.device).unsqueeze(0).expand(x.size(0), -1).unsqueeze(1) # [B, 1, 95]
+        feat = torch.cat([spectral_embed, wss_embed, pos_embed], dim=1) # [B, 2*hidden_embed_dim+1, 95]
+        
+        print("feat.shape: ", feat.shape)
+        g = self.global_proj(base_global).unsqueeze(-1) # [B, 64, 1]
+        print("g.shape: ", g.shape)
+        output = self.layer(feat) # [B, 2 * hidden_embed_dim + 1, 95]
+        print("output.shape: ", output.shape)
+        residue = output + g
+        base = base_global[:, 0:1] + self.tilt_scale * base_global[:, 1:2].view(-1,1) * self.channel_pos.view(1,-1) # [B, 95]
+        
+        result = base + residue
+        return result
+        
