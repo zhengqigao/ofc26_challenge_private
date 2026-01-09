@@ -972,16 +972,17 @@ class Mymodel(nn.Module):
         self.num_layers = num_layers
         if token_model == "attention":
             # Ensure d_model is divisible by nhead; here we use nhead=1
-            self.layer = [nn.Linear(2 * self.hidden_embed_dim + 1, hidden_dim)]
-            for _ in range(self.num_layers):
-                self.layer.append(nn.TransformerEncoderLayer(
+            enc_layer = nn.TransformerEncoderLayer(
                     d_model=hidden_dim,
                     nhead=4,
                     dim_feedforward=hidden_dim,
                     batch_first=True,
-                ))
-            self.layer.append(nn.SiLU())
-            self.layer = nn.Sequential(*self.layer)
+                    norm_first=True,
+                )
+            self.layer = nn.Sequential(nn.Linear(2 * self.hidden_embed_dim + 1, hidden_dim),
+                                       enc_layer,
+                                       nn.SiLU(),
+                                       )
         elif token_model == "conv":
             self.layer = [nn.Conv1d(2 * self.hidden_embed_dim + 1, hidden_dim, kernel_size=3, padding=1)]
             for _ in range(self.num_layers - 1):
