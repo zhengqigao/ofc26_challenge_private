@@ -1000,6 +1000,9 @@ class Mymodel(nn.Module):
         spectral_embed = self.spectral_embed(spectra.unsqueeze(-1)) # [B, 95, hidden_embed_dim]
         wss_embed = self.wss_embed((wss > 0.5).long()) # [B, 95, hidden_embed_dim]
         pos_embed = self.channel_pos.to(x.device).unsqueeze(0).expand(x.size(0), -1).unsqueeze(1) # [B, 1, 95]
+        print("spectral_embed.shape: ", spectral_embed.shape)
+        print("wss_embed.shape: ", wss_embed.shape)
+        print("pos_embed.shape: ", pos_embed.shape)
         feat = torch.cat([spectral_embed, wss_embed, pos_embed], dim=1) # [B, 2*hidden_embed_dim+1, 95]
         
         print("feat.shape: ", feat.shape)
