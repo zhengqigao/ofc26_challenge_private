@@ -29,19 +29,17 @@ class ComplicatedFNN(nn.Module):
         super().__init__()
         self.layers = nn.Sequential(
             nn.Linear(input_dim, 256),
-            nn.ReLU(), # nn.SiLU(),
-            nn.Linear(256, 256),
-            nn.ReLU(), # nn.SiLU(),
-            nn.Linear(256, 256),
-            nn.ReLU(), # nn.SiLU(),
+            nn.ReLU(),
+            nn.Linear(256, 512),
+            nn.ReLU(),
+            nn.Linear(512, 256),
+            nn.ReLU(),
             nn.Linear(256, 128),
-            nn.ReLU(), # nn.SiLU(),
+            nn.ReLU(),
             nn.Linear(128, 128),
-            nn.ReLU(), # nn.SiLU(),
+            nn.ReLU(),
             nn.Linear(128, 128),
-            nn.ReLU(), # nn.SiLU(),
-            nn.Linear(128, 128),
-            nn.ReLU(), # nn.SiLU(),
+            nn.ReLU(),
             nn.Linear(128, output_dim),
         )
         

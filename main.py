@@ -16,8 +16,15 @@ import copy
 from utils.models import *
 # Set seeds
 print("PyTorch version:", torch.__version__)
+import random
 
-
+def seed_everything(seed=42):
+    torch.cuda.manual_seed(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    np.random.seed(seed)
+    random.seed(seed)
+    torch.random.manual_seed(seed)
 
 
 #%%
@@ -180,12 +187,14 @@ if __name__ == "__main__":
     parser.add_argument("--lr", type=float, default=0.01)
     parser.add_argument("--epochs", type=int, default=500)
     parser.add_argument("--batch_size", type=int, default=32)
-    parser.add_argument("--save_model_name", type=str, default="model.pt")
     parser.add_argument("--nn_type", type=str, default="BasicFNN")
     parser.add_argument("--plot_loss", action="store_true", default=False)
     parser.add_argument("--save_best", action="store_true", default=False) # default save the model after the last epoch, if save_best is True, save the model when the validation loss is the best
     parser.add_argument("--weight_decay", type=float, default=0.01)
+    parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
+    
+    seed_everything(args.seed)
     
     X_train = pd.read_csv(TRAIN_FEATURE_PATH).iloc[:, 3:]
     y_train = pd.read_csv(TRAIN_LABEL_PATH)
@@ -193,8 +202,8 @@ if __name__ == "__main__":
     y_train.fillna(0, inplace=True)
 
 
-
-    TrainModelName = model_prepath+args.save_model_name
+    common_suffix = f"_seed{args.seed}_{args.nn_type}_bs{args.batch_size}_lr{args.lr}_wd{args.weight_decay}_ep{args.epochs}"
+    TrainModelName = model_prepath+args.nn_type + common_suffix + ".pt"
 
     # --- Torch: Prepare Data ---
     X_np = X_train.values.astype(np.float32)
@@ -338,7 +347,7 @@ if __name__ == "__main__":
     y_pred.insert(0, kaggle_ID, X_test_full[kaggle_ID].values)
 
     # Save predictions
-    output_path = f"./submission/my_submission_{args.nn_type}.csv"
+    output_path = f"./submission/my_submission_{common_suffix}.csv"
     y_pred.to_csv(output_path, index=False)
     print(f"Saved predictions to {output_path}")
 
