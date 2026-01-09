@@ -941,7 +941,7 @@ class ImprovedEmbedDeepSpectralCNN(nn.Module):
         spectra = x[:, self.global_dim::2] / 100
         wss = x[:, self.global_dim + 1::2]
 
-        wss_embed = self.wss_embed(wss.long())
+        wss_embed = self.wss_embed(wss.long()).transpose(1, 2)
 
         if self.training and self.spectra_noise_std > 0:
             spectra = spectra + torch.randn_like(spectra) * self.spectra_noise_std
@@ -949,7 +949,7 @@ class ImprovedEmbedDeepSpectralCNN(nn.Module):
             raw_global = raw_global + torch.randn_like(raw_global) * self.global_noise_std
 
         pos = self.channel_pos.to(x.device).unsqueeze(0).expand(x.size(0), -1)
-        feat = torch.stack([spectra, wss_embed, pos], dim=1)  # [B, 2 + hidden_embed_dim, N]
+        feat = torch.cat([spectra.unsqueeze(1), wss_embed, pos.unsqueeze(1)], dim=1)  # [B, 2 + hidden_embed_dim, N]
 
         h = self.conv_in(feat) # [B, hidden_channels, N]
         g = self.global_mlp(raw_global).unsqueeze(-1)
