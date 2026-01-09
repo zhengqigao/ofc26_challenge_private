@@ -14,10 +14,11 @@ import torch.optim as optim
 from torch.utils.data import TensorDataset, DataLoader, random_split, Subset
 import copy
 from utils.models import *
+from utils.helper import seed_everything
 # Set seeds
 print("PyTorch version:", torch.__version__)
-torch.manual_seed(256)
-np.random.seed(256)
+
+
 
 
 
@@ -402,7 +403,10 @@ if __name__ == "__main__":
     parser.add_argument("--spectral_layers", type=int, default=None)
     parser.add_argument("--spectral_dropout", type=float, default=None)
     parser.add_argument("--spectral_ff_mult", type=int, default=None)
+    parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
+
+    seed_everything(args.seed)
 
     def _default_if_none(value, default):
         return default if value is None else value
