@@ -174,9 +174,20 @@ def build_model(args, input_dim, num_channels):
             spectra_noise_std=args.spectra_noise_std,
             global_noise_std=args.global_noise_std,
         )
+    if args.nn_type == "SpectralCNN":
+        return SpectralCNN(
+        input_dim,
+        output_dim = num_channels,
+        num_channels = num_channels,
+        global_dim=4,
+        hidden_channels=32,
+        dropout=args.spectral_dropout,
+        spectra_noise_std=args.spectra_noise_std,
+        global_noise_std=args.global_noise_std,)
+        
     available_models = ["BasicFNN", "LinearGateNet", "GatedBasicFNN", "ResidualFNN",
                         "AttentionFNN", "ChannelWiseFNN", "LightweightFNN", "HybridFNN",
-                        "DeepResidualFNN", "SpectralTransformer"]
+                        "DeepResidualFNN", "SpectralTransformer", "SpectralCNN"]
     raise ValueError(f"Invalid nn_type: {args.nn_type}. Available: {', '.join(available_models)}")
 
 
