@@ -953,7 +953,7 @@ class ImprovedEmbedDeepSpectralCNN(nn.Module):
         return base + residual
     
 class Mymodel(nn.Module):
-    def __init(self,global_dim = 4, numchannel = 95, hidden_embed_dim = 4, use_attention = False):
+    def __init__(self, global_dim = 4, numchannel = 95, hidden_embed_dim = 4, use_attention = False):
         super().__init__()
         self.global_dim = 4
         self.numchannel = 95
@@ -992,7 +992,7 @@ class Mymodel(nn.Module):
         wss = x[:, self.global_dim + 1::2] # [B, 95]
         
         spectral_embed = self.spectral_embed(spectra.unsqueeze(-1)) # [B, 95, hidden_embed_dim]
-        wss_embed = self.wss_embed(wss.long()) # [B, 95, hidden_embed_dim]
+        wss_embed = self.wss_embed((wss > 0.5).long()) # [B, 95, hidden_embed_dim]
         pos_embed = self.channel_pos.to(x.device).unsqueeze(0).expand(x.size(0), -1).unsqueeze(1) # [B, 1, 95]
         feat = torch.cat([spectral_embed, wss_embed, pos_embed], dim=1) # [B, 2*hidden_embed_dim+1, 95]
         
