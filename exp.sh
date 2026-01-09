@@ -1,28 +1,14 @@
 #!/bin/bash
 
+python main.py --epochs 5000 --lr 0.005 --save_best --nn_type BasicFNN --batch_size 32  --seed 1
+python main.py --epochs 5000 --lr 0.005 --save_best --nn_type BasicFNN --batch_size 32  --seed 2
+python main.py --epochs 5000 --lr 0.005 --save_best --nn_type BasicFNN --batch_size 32  --seed 3
+python main.py --epochs 5000 --lr 0.005 --save_best --nn_type BasicFNN --batch_size 32  --seed 4
+python main.py --epochs 5000 --lr 0.005 --save_best --nn_type BasicFNN --batch_size 32  --seed 5
+python main.py --epochs 5000 --lr 0.005 --save_best --nn_type BasicFNN --batch_size 32  --seed 6
+python main.py --epochs 5000 --lr 0.005 --save_best --nn_type BasicFNN --batch_size 32  --seed 7
+python main.py --epochs 5000 --lr 0.005 --save_best --nn_type BasicFNN --batch_size 32  --seed 8
+python main.py --epochs 5000 --lr 0.005 --save_best --nn_type BasicFNN --batch_size 32  --seed 9
+python main.py --epochs 5000 --lr 0.005 --save_best --nn_type BasicFNN --batch_size 32  --seed 10
 
-EPOCHS=5000
-SAVE_BEST="--save_best"
-
-run_model=$1 # can be BasicFNN, LinearGateNet, GatedBasicFNN, ResidualFNN, AttentionFNN, ChannelWiseFNN, LightweightFNN, HybridFNN, DeepResidualFNN
-device=$2 
-batch_size=$3
-lr=$4
-
-CUDA_VISIBLE_DEVICES=${device} python main.py --nn_type ${run_model} --lr ${lr} --epochs ${EPOCHS} --batch_size ${batch_size} --save_model_name ${run_model}.pt $SAVE_BEST
-
-# python main.py --nn_type LinearGateNet --lr $LR --epochs $EPOCHS --batch_size $BATCH_SIZE --save_model_name LinearGateNet.pt $SAVE_BEST
-
-# python main.py --nn_type GatedBasicFNN --lr $LR --epochs $EPOCHS --batch_size $BATCH_SIZE --save_model_name GatedBasicFNN.pt $SAVE_BEST
-
-# python main.py --nn_type ResidualFNN --lr $LR --epochs $EPOCHS --batch_size $BATCH_SIZE --save_model_name ResidualFNN.pt $SAVE_BEST
-
-# python main.py --nn_type AttentionFNN --lr $LR --epochs $EPOCHS --batch_size $BATCH_SIZE --save_model_name AttentionFNN.pt $SAVE_BEST
-
-# python main.py --nn_type ChannelWiseFNN --lr $LR --epochs $EPOCHS --batch_size $BATCH_SIZE --save_model_name ChannelWiseFNN.pt $SAVE_BEST
-
-# python main.py --nn_type LightweightFNN --lr $LR --epochs $EPOCHS --batch_size $BATCH_SIZE --save_model_name LightweightFNN.pt $SAVE_BEST
-
-# python main.py --nn_type HybridFNN --lr $LR --epochs $EPOCHS --batch_size $BATCH_SIZE --save_model_name HybridFNN.pt $SAVE_BEST
-
-# python main.py --nn_type DeepResidualFNN --lr $LR --epochs $EPOCHS --batch_size $BATCH_SIZE --save_model_name DeepResidualFNN.pt $SAVE_BEST
+python kaggle_submit.py
