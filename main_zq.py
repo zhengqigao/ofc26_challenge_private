@@ -238,7 +238,9 @@ if __name__ == "__main__":
         raise ValueError(f"Invalid nn_type: {args.nn_type}.")
 
     base_model.to(device)
-    
+    num_params = sum(p.numel() for p in base_model.parameters() if p.requires_grad)
+    print(f"Number of trainable parameters in model: {num_params/1e6:.2f} Million")
+
     optimizer = optim.AdamW(base_model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
     train_losses = []
