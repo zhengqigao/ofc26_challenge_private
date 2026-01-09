@@ -427,7 +427,6 @@ def parse_args():
     parser.add_argument("--lr", type=float, default=0.01)
     parser.add_argument("--epochs", type=int, default=500)
     parser.add_argument("--batch_size", type=int, default=32)
-    parser.add_argument("--save_model_name", type=str, default="model.pt")
     parser.add_argument("--nn_type", type=str, default="BasicFNN")
     parser.add_argument("--plot_loss", action="store_true", default=False)
     parser.add_argument("--save_best", action="store_true", default=False)
@@ -498,7 +497,8 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
-    train_model_name = os.path.join(MODEL_DIR, args.save_model_name)
+    common_suffix = f"_{args.nn_type}_lr{args.lr}_bs{args.batch_size}_ep{args.epochs}_seed{args.seed}"
+    train_model_name = os.path.join(MODEL_DIR, args.nn_type + common_suffix + ".pt")
 
     if args.cv_folds > 1:
         if args.cv_group_col:
@@ -567,7 +567,7 @@ def main():
             fold_pred = predict_model(best_model, x_test_tensor)
             pred_sum = fold_pred if pred_sum is None else pred_sum + fold_pred
             if args.save_fold_csv:
-                fold_tag = f"{args.nn_type}_cv{args.cv_folds}_fold{fold_idx}"
+                fold_tag = f"{common_suffix}_cv{args.cv_folds}_fold{fold_idx}"
                 write_submission(
                     fold_pred,
                     fold_tag,
@@ -651,11 +651,10 @@ def main():
 
         x_test_tensor = torch.from_numpy(x_test_scaled.values.astype(np.float32)).to(device)
         y_pred_array = predict_model(best_model, x_test_tensor)
-        output_tag = args.nn_type
 
     write_submission(
         y_pred_array,
-        output_tag,
+        common_suffix,
         y_train.columns,
         X_test_full,
         X_test_features,
