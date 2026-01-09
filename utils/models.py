@@ -929,9 +929,7 @@ class ImprovedEmbedDeepSpectralCNN(nn.Module):
         )
 
         self.wss_embed = nn.Embedding(2, hidden_embed_dim)
-        self.tilt_embed = nn.Embedding(2, 1)
-        with torch.no_grad():
-            self.tilt_embed.weight.zero_()
+        self.tilt_scale = nn.Parameter(torch.tensor(1.0))
 
         pos = torch.linspace(-0.5, 0.5, steps=num_channels)
         self.register_buffer("channel_pos", pos, persistent=False)
@@ -961,7 +959,5 @@ class ImprovedEmbedDeepSpectralCNN(nn.Module):
         h = self.conv_mid(h) # [B, hidden_channels, N]
         residual = self.conv_out(h).squeeze(1) # [B, N]
 
-        tmp = (base_global[:, 1:2] < -0.5).long()
-        tilt_embed = self.tilt_embed(tmp)
-        base = base_global[:, 0:1] + tilt_embed.view(-1,1) * self.channel_pos.view(1,-1)
+        base = base_global[:, 0:1] + self.tilt_scale * base_global[:, 1:2].view(-1,1) * self.channel_pos.view(1,-1)
         return base + residual

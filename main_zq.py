@@ -183,7 +183,7 @@ if __name__ == "__main__":
             num_channels = 95,
             global_dim=4,
             hidden_channels=32,
-            hidden_embed_dim=4,
+            hidden_embed_dim=2,
             dropout=0.1,
             spectra_noise_std=0.0,
             global_noise_std=0.0,)
