@@ -953,12 +953,13 @@ class ImprovedEmbedDeepSpectralCNN(nn.Module):
         return base + residual
     
 class Mymodel(nn.Module):
-    def __init__(self, global_dim = 4, numchannel = 95, hidden_embed_dim = 4, use_attention = False):
+    def __init__(self, global_dim = 4, numchannel = 95, hidden_embed_dim = 4, hidden_dim = 64, token_model = "conv"):
         super().__init__()
         self.global_dim = 4
         self.numchannel = 95
         self.hidden_embed_dim = 4
-        self.use_attention = use_attention
+        self.token_model = token_model
+        self.hidden_dim = hidden_dim
         
         self.channel_pos = nn.Parameter(torch.linspace(-0.5, 0.5, steps=self.numchannel))
         self.tilt_scale = nn.Parameter(torch.tensor(1.0))
@@ -969,29 +970,35 @@ class Mymodel(nn.Module):
         )
         self.wss_embed = nn.Embedding(2, self.hidden_embed_dim)
 
-        if use_attention:
+        if token_model == "attention":
             # Ensure d_model is divisible by nhead; here we use nhead=1
-            self.layer = nn.TransformerEncoderLayer(
-                d_model=2 * self.hidden_embed_dim + 1,
-                nhead=1,
-                dim_feedforward=128,
-                batch_first=True,
-            )
-        else:
             self.layer = nn.Sequential(
-                nn.Conv1d(2 * self.hidden_embed_dim + 1, 64, kernel_size=3, padding=1),
+                nn.Linear(2 * self.hidden_embed_dim + 1, hidden_dim),
+                nn.TransformerEncoderLayer(
+                d_model=hidden_dim,
+                nhead=1,
+                dim_feedforward=hidden_dim,
+                batch_first=True,
+            ),
+                )
+        elif token_model == "conv":
+            self.layer = nn.Sequential(
+                nn.Conv1d(2 * self.hidden_embed_dim + 1, hidden_dim, kernel_size=3, padding=1),
                 nn.SiLU(),
-                nn.Conv1d(64, 64, kernel_size=3, padding=1),
+                nn.Conv1d(hidden_dim, hidden_dim, kernel_size=3, padding=1),
                 nn.SiLU(),
             )    
         
         self.global_proj = nn.Sequential(
-            nn.Linear(self.global_dim, 64),
+            nn.Linear(self.global_dim, hidden_dim),
             nn.SiLU(),
-            nn.Linear(64, 64),
+            nn.Linear(hidden_dim, hidden_dim),
             nn.SiLU(),
         )
         
+        self.final_proj = nn.Sequential(
+            nn.Conv1d(hidden_dim, 1, kernel_size=1),
+        )
     def forward(self, x):
         base_global = x[:, :self.global_dim] # [B, 4]
         spectra = x[:, self.global_dim::2] / 100 # [B, 95]
@@ -999,20 +1006,22 @@ class Mymodel(nn.Module):
         
         spectral_embed = self.spectral_embed(spectra.unsqueeze(-1)) # [B, 95, hidden_embed_dim]
         wss_embed = self.wss_embed((wss > 0.5).long()) # [B, 95, hidden_embed_dim]
-        pos_embed = self.channel_pos.to(x.device).unsqueeze(0).expand(x.size(0), -1).unsqueeze(1) # [B, 1, 95]
-        print("spectral_embed.shape: ", spectral_embed.shape)
-        print("wss_embed.shape: ", wss_embed.shape)
-        print("pos_embed.shape: ", pos_embed.shape)
-        feat = torch.cat([spectral_embed, wss_embed, pos_embed], dim=1) # [B, 2*hidden_embed_dim+1, 95]
+        pos_embed = self.channel_pos.to(x.device).expand(x.size(0), -1).unsqueeze(-1) # [B, 95, 1]
+
+        feat = torch.cat([spectral_embed, wss_embed, pos_embed], dim=-1) # [B, 95, 2*hidden_embed_dim+1]
         
-        print("feat.shape: ", feat.shape)
-        g = self.global_proj(base_global).unsqueeze(-1) # [B, 64, 1]
-        print("g.shape: ", g.shape)
-        output = self.layer(feat) # [B, 2 * hidden_embed_dim + 1, 95]
-        print("output.shape: ", output.shape)
-        residue = output + g
+        if self.token_model == "attention":
+            output = self.layer(feat) # [B, 95, hidden_dim]
+        elif self.token_model == "conv":
+            output = self.layer(feat.transpose(1, 2)).transpose(1, 2) # [B, 95, hidden_dim]
+
+
+        g = self.global_proj(base_global).unsqueeze(1) # [B, 1, hidden_dim]
+        residual = output + g # [B, 95, hidden_dim]
+        residual = self.final_proj(residual.transpose(1, 2)).squeeze(1) # [B, 95]
+        
         base = base_global[:, 0:1] + self.tilt_scale * base_global[:, 1:2].view(-1,1) * self.channel_pos.view(1,-1) # [B, 95]
         
-        result = base + residue
+        result = base + residual
         return result
         

@@ -164,14 +164,14 @@ if __name__ == "__main__":
             global_dim=4,
             numchannel=95,
             hidden_embed_dim=2,
-            use_attention=True,
+            token_model="attention",
         ).to(device)
     elif args.nn_type == "MymodelConv":
         base_model = Mymodel(
             global_dim=4,
             numchannel=95,
             hidden_embed_dim=2,
-            use_attention=False,
+            token_model="conv",
         ).to(device)
     elif args.nn_type == "SpectralCNN":
         base_model = SpectralCNN(
