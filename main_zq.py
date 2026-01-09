@@ -156,6 +156,16 @@ if __name__ == "__main__":
             dropout=0.1,
             spectra_noise_std=0.0,
             global_noise_std=0.0,)
+    elif args.nn_type == "ImprovedSpectralCNN":
+        base_model = ImprovedSpectralCNN(
+            X_tensor.shape[1],
+            output_dim = 95,
+            num_channels = 95,
+            global_dim=4,
+            hidden_channels=32,
+            dropout=0.1,
+            spectra_noise_std=0.0,
+            global_noise_std=0.0,)
     else:
         available_models = ["BasicFNN", "LinearGateNet", "GatedBasicFNN", "ResidualFNN", 
                            "AttentionFNN", "ChannelWiseFNN", "LightweightFNN", "HybridFNN", "DeepResidualFNN", "SpectralCNN"]

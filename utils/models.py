@@ -698,3 +698,79 @@ class SpectralCNN(nn.Module):
 
         base = base_global[:, 0:1] + base_global[:, 1:2] * self.tilt_scale * self.channel_pos
         return base + residual
+
+
+
+class ImprovedSpectralCNN(nn.Module):
+    """
+    Lightweight 1D CNN over channels with global conditioning and residual-on-tilt output.
+    """
+    def __init__(
+        self,
+        input_dim,
+        output_dim,
+        num_channels=95,
+        global_dim=4,
+        hidden_channels=32,
+        dropout=0.2,
+        spectra_noise_std=0.0,
+        global_noise_std=0.0,
+    ):
+        super().__init__()
+        inferred = (input_dim - global_dim) // 2
+        if input_dim != global_dim + inferred * 2:
+            raise ValueError(f"Invalid input_dim: {input_dim} for global_dim={global_dim}.")
+        if inferred != num_channels:
+            num_channels = inferred
+        if output_dim != num_channels:
+            raise ValueError(f"output_dim {output_dim} must match num_channels {num_channels}.")
+
+        self.global_dim = global_dim
+        self.num_channels = num_channels
+        self.spectra_noise_std = spectra_noise_std
+        self.global_noise_std = global_noise_std
+
+        self.global_mlp = nn.Sequential(
+            nn.Linear(global_dim, hidden_channels),
+            nn.SiLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_channels, hidden_channels),
+        )
+
+        self.conv_in = nn.Conv1d(3, hidden_channels, kernel_size=5, padding=3)
+        self.conv_mid = nn.Sequential(
+            nn.SiLU(),
+            nn.Dropout(dropout),
+            nn.Conv1d(hidden_channels, hidden_channels, kernel_size=5, padding=3),
+            nn.SiLU(),
+            nn.Dropout(dropout),
+        )
+        self.conv_out = nn.Conv1d(hidden_channels, 1, kernel_size=1)
+
+        self.tilt_scale = nn.Parameter(torch.tensor(1.0))
+        pos = torch.linspace(-0.5, 0.5, steps=num_channels)
+        self.register_buffer("channel_pos", pos, persistent=False)
+
+    def forward(self, x):
+        x = x.clone()
+        raw_global = x[:, :self.global_dim]
+        base_global = raw_global
+        spectra = x[:, self.global_dim::2] / 100
+        wss = x[:, self.global_dim + 1::2]
+
+        if self.training and self.spectra_noise_std > 0:
+            spectra = spectra + torch.randn_like(spectra) * self.spectra_noise_std
+        if self.training and self.global_noise_std > 0:
+            raw_global = raw_global + torch.randn_like(raw_global) * self.global_noise_std
+
+        pos = self.channel_pos.to(x.device).unsqueeze(0).expand(x.size(0), -1)
+        feat = torch.stack([spectra, wss, pos], dim=1)  # [B, 3, N]
+
+        h = self.conv_in(feat)
+        g = self.global_mlp(raw_global).unsqueeze(-1)
+        h = h + g
+        h = self.conv_mid(h)
+        residual = self.conv_out(h).squeeze(1)
+
+        base = base_global[:, 0:1] + base_global[:, 1:2] * self.tilt_scale * self.channel_pos
+        return base + residual
