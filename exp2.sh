@@ -15,7 +15,7 @@ hidden_dim="$3"
 num_layers="$4"
 
 # Array of seeds
-seeds=(200 201 202)
+seeds=(300 301 302)
 
 # 1. Runs with lr=0.001, no scheduler
 for seed in "${seeds[@]}"; do
