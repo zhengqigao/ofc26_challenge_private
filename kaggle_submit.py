@@ -23,6 +23,7 @@ if __name__ == "__main__":
                 print(f"Submit success: {file}")
                 if args.remove_if_submit_success:
                     os.remove(file_path)
+                    print(f"Remove success: {file}")
                 count += 1
         if count % 10 == 0:
             time.sleep(20)
