@@ -111,7 +111,6 @@ if __name__ == "__main__":
     parser.add_argument("--nn_type", type=str, default="BasicFNN")
     parser.add_argument("--seed", type=int, default=256)
     parser.add_argument("--save_best", action="store_true", default=False)
-    parser.add_argument("--save_path", type=str, default="./model/model.pt")
     parser.add_argument("--hidden_embed_dim", type=int, default=2)
     parser.add_argument("--hidden_dim", type=int, default=64)
     parser.add_argument("--num_layers", type=int, default=3)
@@ -159,7 +158,7 @@ if __name__ == "__main__":
 
     Numchannels = 95
     # common_suffix = f"_{args.nn_type}_lr{args.lr}_bs{args.batch_size}_ep{args.epochs}_seed{args.seed}_hidden_embed_dim{args.hidden_embed_dim}_hidden_dim{args.hidden_dim}_num_layers{args.num_layers}_lr_scheduler{args.lr_scheduler}_scheduler_step_size{args.scheduler_step_size}_scheduler_gamma{args.scheduler_gamma}_scheduler_eta_min{args.scheduler_eta_min}_cosmos_ratio{args.cosmos_ratio}"
-    TrainModelName = os.path.join(args.save_path, "model_" + args.nn_type + ".pt")
+    TrainModelName = "./model/model_" + args.nn_type + ".pt"
 
     # --- Torch: Prepare Data ---
     X_np = X_train.values.astype(np.float32)
