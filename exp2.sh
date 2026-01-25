@@ -15,7 +15,7 @@ hidden_dim="$3"
 num_layers="$4"
 
 # Array of seeds
-seeds=(300)
+seeds=(301)
 
 # 1. Runs with lr=0.001, no scheduler
 for seed in "${seeds[@]}"; do
@@ -34,7 +34,7 @@ for seed in "${seeds[@]}"; do
 
     CUDA_VISIBLE_DEVICES="${idx}" python main_zq.py \
         --epochs 2000 \
-        --lr 0.0005 \
+        --lr 0.0001 \
         --save_best \
         --nn_type MymodelAttention \
         --batch_size 64 \
