@@ -296,6 +296,7 @@ if __name__ == "__main__":
     if args.resume_from is not None and os.path.isfile(args.resume_from):
         print(f"Loading checkpoint from {args.resume_from} to resume training.")
         checkpoint = torch.load(args.resume_from, map_location=device)
+        base_model.load_state_dict(checkpoint)
     else:
         if args.resume_from:
             print(f"Warning: Resume checkpoint path {args.resume_from} does not exist, training from scratch.")
