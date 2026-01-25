@@ -30,11 +30,11 @@ def load_csvs(paths):
 
 TRAIN_FEATURE_PATH = [
     "./data/train_features.csv",
-    "./ofc-ml-challenge-data-code/Features/Train/COSMOS_features.csv"
+    "./data/COSMOS_features.csv"
 ]
 TRAIN_LABEL_PATH = [
     "./data/train_labels.csv",
-    "./ofc-ml-challenge-data-code/Features/Train/COSMOS_labels.csv"
+    "./data/COSMOS_labels.csv"
 ]
 
 # Full path to test data

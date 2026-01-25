@@ -3,6 +3,8 @@ model/
 model/*.pt
 model/*.pth
 
+data/
+
 # Submission files
 submission/
 submission/*.csv
