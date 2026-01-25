@@ -19,11 +19,23 @@ import random
 print("PyTorch version:", torch.__version__)
 
 # %%
+# Utility function: load from checkpoint
+def load_checkpoint(model, checkpoint_path, map_location=None):
+    checkpoint = torch.load(checkpoint_path, map_location=map_location)
+    if isinstance(checkpoint, dict) and 'state_dict' in checkpoint:
+        model.load_state_dict(checkpoint['state_dict'])
+    elif isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
+        model.load_state_dict(checkpoint['model_state_dict'])
+    elif hasattr(model, 'load_state_dict'):
+        model.load_state_dict(checkpoint)
+    else:
+        # may be whole-model serialization (discouraged, but support if so)
+        model = checkpoint
+    return model
+
 # Full paths to training data
-# Utility functions to load features/labels from single or multiple CSV files.
 def load_csvs(paths):
     if isinstance(paths, (list, tuple)):
-        # concatenate on axis=0 (rows)
         return pd.concat([pd.read_csv(p) for p in paths], axis=0, ignore_index=True)
     else:
         return pd.read_csv(paths)
@@ -44,37 +56,15 @@ FINAL_TRAIN_LABEL_PATH = [
     "./data/train_labels.csv",
 ]
 
-# Full path to test data
 TEST_FEATURE_PATH = f"./data/test_features.csv"
 
-# Output folders
 figure_prepath = f"./figures/"
 model_prepath = f"./model/"
 
-# %%
-### helper labels - fixed
-# Numchannels = 95
-# num_inputFeatures = Numchannels * 2 + 4 # target_gain, target_gain_tilt, EDFA_input_power_total, EDFA_output_power_total
-# labels = {"gainValue":'target_gain',
-#           "EDFA_input":'EDFA_input_power_total',
-#           "EDFA_output":'EDFA_output_power_total',
-#           "inSpectra":'EDFA_input_spectra_',
-#           "WSS":'DUT_WSS_activated_channel_index_',
-#           "result":'calculated_gain_spectra_'}
-# inSpectra_labels = [labels['inSpectra']+str(i).zfill(2) for i in range(0,Numchannels)]
-# onehot_labels = [labels['WSS']+str(i).zfill(2) for i in range(0,Numchannels)]
-# result_labels = [labels['result']+str(i).zfill(2) for i in range(0,Numchannels)]
-# preProcess_labels = [labels['EDFA_input'],labels['EDFA_output']]
-# preProcess_labels.extend(inSpectra_labels)
-
 def custom_loss_L2_pytorch(y_pred, y_actual):
-    # y_pred, y_actual shape: [batch, channels]
-    # turn unloaded y_pred prediction to zero
-    # For each value, if actual==0, pred->0; else pred unchanged
     y_pred_cast_unloaded_to_zero = torch.where(y_actual != 0, y_pred, torch.zeros_like(y_pred))
     error = (y_pred_cast_unloaded_to_zero - y_actual) ** 2
     loaded_size = (y_actual != 0).sum().float()
-    # avoid division by zero
     loss = torch.sqrt(error.sum() / (loaded_size + 1e-8))
     return loss
 
@@ -96,32 +86,20 @@ def seed_everything(seed):
     random.seed(seed)
     torch.random.manual_seed(seed)
 
-# ---- 统一的Scheduler工厂函数 ----
 def get_scheduler(optimizer, scheduler_type, epochs, **kwargs):
-    """
-    Returns the specified learning rate scheduler.
-    Args:
-        optimizer: torch optimizer
-        scheduler_type: str, e.g. 'none', 'step', 'cosine'
-        epochs: int, total epochs
-        **kwargs: extra args for scheduler
-    """
     scheduler_type = scheduler_type.lower()
     if scheduler_type == "none":
         return None
     elif scheduler_type == "step":
-        # StepLR, default 100 step, gamma=0.5, 可配置
         step_size = kwargs.get("step_size", 100)
         gamma = kwargs.get("gamma", 0.5)
         return optim.lr_scheduler.StepLR(optimizer, step_size=step_size, gamma=gamma)
     elif scheduler_type == "cosine":
-        # CosineAnnealingLR
         T_max = kwargs.get("t_max", epochs)
         eta_min = kwargs.get("eta_min", 0)
         return optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=T_max, eta_min=eta_min)
     else:
         raise ValueError(f"Unsupported lr_scheduler: {scheduler_type}")
-    # 可在这里扩展其它类型
 
 if __name__ == "__main__":
     
@@ -132,13 +110,11 @@ if __name__ == "__main__":
     parser.add_argument("--weight_decay", type=float, default=0.001)
     parser.add_argument("--nn_type", type=str, default="BasicFNN")
     parser.add_argument("--seed", type=int, default=256)
-    parser.add_argument("--save_best", action="store_true", default=False) # default save the model after the last epoch, if save_best is True, save the model when the validation loss is the best
-
+    parser.add_argument("--save_best", action="store_true", default=False)
+    parser.add_argument("--save_path", type=str, default="./model/model.pt")
     parser.add_argument("--hidden_embed_dim", type=int, default=2)
     parser.add_argument("--hidden_dim", type=int, default=64)
     parser.add_argument("--num_layers", type=int, default=3)
-    
-    # 新增lr scheduler相关参数
     parser.add_argument("--lr_scheduler", type=str, default="none", choices=["none","step","cosine"], 
                         help="选择lr scheduler策略：none/step/cosine (可扩展类型)")
     parser.add_argument("--scheduler_step_size", type=int, default=100, 
@@ -147,10 +123,10 @@ if __name__ == "__main__":
                         help="StepLR: 衰减系数")
     parser.add_argument("--scheduler_eta_min", type=float, default=0,
                         help="CosineAnnealingLR: 最小lr")
-
-    # 新增参数：控制COSMOS数据倍数
     parser.add_argument("--cosmos_ratio", type=float, default=1.0, help="COSMOS数据扩增倍数，相对于原始train的样本数")
-
+    # 新增: 是否加载checkpoint继续训练
+    parser.add_argument("--resume_from", type=str, default=None, help="传入checkpoint的模型路径，继续训练")
+    
     args = parser.parse_args()
     
     seed_everything(args.seed)
@@ -158,15 +134,12 @@ if __name__ == "__main__":
     # 读取原始训练数据
     train_features_df = pd.read_csv("./data/train_features.csv")
     train_labels_df = pd.read_csv("./data/train_labels.csv")
-
     cosmos_features_df = pd.read_csv("./data/COSMOS_features.csv")
     cosmos_labels_df = pd.read_csv("./data/COSMOS_labels.csv")
 
-    # 根据cosmos_ratio采样/扩增COSMOS数据（若ratio=0，则不采，ratio=1采和train一样多，ratio=2采2倍train，以此类推）
     num_train_rows = len(train_features_df)
     cosmos_use_num = int(args.cosmos_ratio * num_train_rows)
     if cosmos_use_num > 0 and len(cosmos_features_df) > 0:
-        # 如果需要的数据比COSMOS本身还多，则做有放回采样，否则做随机采样
         replace_flag = cosmos_use_num > len(cosmos_features_df)
         cosmos_features_used = cosmos_features_df.sample(n=cosmos_use_num, replace=replace_flag, random_state=args.seed)
         cosmos_labels_used = cosmos_labels_df.loc[cosmos_features_used.index].reset_index(drop=True)
@@ -174,34 +147,27 @@ if __name__ == "__main__":
         cosmos_features_used = cosmos_features_df.iloc[[]]
         cosmos_labels_used = cosmos_labels_df.iloc[[]]
 
-    # 合并train和cosmos
     all_features = pd.concat([train_features_df, cosmos_features_used.reset_index(drop=True)], axis=0, ignore_index=True)
     all_labels = pd.concat([train_labels_df, cosmos_labels_used], axis=0, ignore_index=True)
 
-    # 原有的：X_train = load_csvs(TRAIN_FEATURE_PATH)
     X_train = all_features
     y_train = all_labels
-    print(f"X_train.shape: {X_train.shape}")
-    print(f"y_train.shape: {y_train.shape}")
+    print(f"use number of samples: {len(X_train)}")
     
     X_train = X_train.iloc[:, 3:]
     y_train.fillna(0, inplace=True)
 
     Numchannels = 95
-    common_suffix = f"_{args.nn_type}_lr{args.lr}_bs{args.batch_size}_ep{args.epochs}_seed{args.seed}_hidden_embed_dim{args.hidden_embed_dim}_hidden_dim{args.hidden_dim}_num_layers{args.num_layers}_lr_scheduler{args.lr_scheduler}_scheduler_step_size{args.scheduler_step_size}_scheduler_gamma{args.scheduler_gamma}_scheduler_eta_min{args.scheduler_eta_min}_cosmos_ratio{args.cosmos_ratio}"
-    TrainModelName = "./model/" + args.nn_type + common_suffix + ".pt"
+    # common_suffix = f"_{args.nn_type}_lr{args.lr}_bs{args.batch_size}_ep{args.epochs}_seed{args.seed}_hidden_embed_dim{args.hidden_embed_dim}_hidden_dim{args.hidden_dim}_num_layers{args.num_layers}_lr_scheduler{args.lr_scheduler}_scheduler_step_size{args.scheduler_step_size}_scheduler_gamma{args.scheduler_gamma}_scheduler_eta_min{args.scheduler_eta_min}_cosmos_ratio{args.cosmos_ratio}"
+    TrainModelName = os.path.join(args.save_path, "model_" + args.nn_type + ".pt")
 
     # --- Torch: Prepare Data ---
     X_np = X_train.values.astype(np.float32)
     y_np = y_train.values.astype(np.float32)
-
     X_tensor = torch.from_numpy(X_np)
     y_tensor = torch.from_numpy(y_np)
 
-    # Create TensorDataset
     dataset = TensorDataset(X_tensor, y_tensor)
-
-    # Split into train and val (as keras validation_split=0.2)
     n_total = len(dataset)
     n_val = int(0.2 * n_total)
     n_train = n_total - n_val
@@ -233,17 +199,18 @@ if __name__ == "__main__":
         base_model = DeepResidualFNN(X_tensor.shape[1], Numchannels).to(device)
     elif args.nn_type == "SpectralTransformer":
         base_model = SpectralTransformer(
-        X_tensor.shape[1],
-        Numchannels,
-        num_channels=95,
-        global_dim=4,
-        embed_dim=64,
-        num_heads=4,
-        num_layers=2,
-        dropout=0.1,
-        ff_mult=2,
-        spectra_noise_std=0.0,
-        global_noise_std=0.0,)
+            X_tensor.shape[1],
+            Numchannels,
+            num_channels=95,
+            global_dim=4,
+            embed_dim=64,
+            num_heads=4,
+            num_layers=2,
+            dropout=0.1,
+            ff_mult=2,
+            spectra_noise_std=0.0,
+            global_noise_std=0.0,
+        )
     elif args.nn_type == "MymodelAttention":
         base_model = Mymodel(
             global_dim=4,
@@ -303,17 +270,17 @@ if __name__ == "__main__":
             global_noise_std=0.0,)
     elif args.nn_type == "ImprovedSpectralTransformer":
         base_model = ImprovedSpectralTransformer(
-        input_dim=X_tensor.shape[1],
-        output_dim=95,
-        num_channels=95,
-        global_dim=4,
-        embed_dim=64,
-        num_heads=4,
-        num_layers=2,
-        dropout=0.25,
-        stochastic_depth_prob=0.1, 
-        use_channel_weighting=True,
-    ).to(device)
+            input_dim=X_tensor.shape[1],
+            output_dim=95,
+            num_channels=95,
+            global_dim=4,
+            embed_dim=64,
+            num_heads=4,
+            num_layers=2,
+            dropout=0.25,
+            stochastic_depth_prob=0.1, 
+            use_channel_weighting=True,
+        ).to(device)
     else:
         raise ValueError(f"Invalid nn_type: {args.nn_type}.")
 
@@ -323,22 +290,52 @@ if __name__ == "__main__":
 
     optimizer = optim.AdamW(base_model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
-    # === 新增 lr_scheduler 构建 ===
     scheduler_kwargs = {}
     if args.lr_scheduler == "step":
         scheduler_kwargs = {'step_size': args.scheduler_step_size, 'gamma': args.scheduler_gamma}
     if args.lr_scheduler == "cosine":
         scheduler_kwargs = {'t_max': args.epochs, 'eta_min': args.scheduler_eta_min}
-
     lr_scheduler = get_scheduler(optimizer, args.lr_scheduler, args.epochs, **scheduler_kwargs)
     if lr_scheduler is not None:
         print(f"Using lr_scheduler: {args.lr_scheduler}")
 
+    # ========== 加载已有checkpoint继续训练 ==========
+    start_epoch = 0
     train_losses = []
     val_losses = []
     best_val_loss = float('inf')
     best_model = None
-    for epoch in range(args.epochs):
+
+    if args.resume_from is not None and os.path.isfile(args.resume_from):
+        print(f"Loading checkpoint from {args.resume_from} to resume training.")
+        checkpoint = torch.load(args.resume_from, map_location=device)
+        if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
+            base_model.load_state_dict(checkpoint['model_state_dict'])
+            if 'optimizer_state_dict' in checkpoint:
+                optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            if 'lr_scheduler_state_dict' in checkpoint and lr_scheduler is not None:
+                lr_scheduler.load_state_dict(checkpoint['lr_scheduler_state_dict'])
+            if 'train_losses' in checkpoint: train_losses = checkpoint['train_losses']
+            if 'val_losses' in checkpoint: val_losses = checkpoint['val_losses']
+            if 'best_val_loss' in checkpoint: best_val_loss = checkpoint['best_val_loss']
+            if 'epoch' in checkpoint: start_epoch = checkpoint['epoch'] + 1
+            if 'best_model_state_dict' in checkpoint and args.save_best:
+                best_model = copy.deepcopy(base_model)
+                best_model.load_state_dict(checkpoint['best_model_state_dict'])
+            else:
+                best_model = copy.deepcopy(base_model)
+        else:
+            # whole model file, fallback to torch.save(model)
+            base_model = checkpoint
+            best_model = copy.deepcopy(base_model)
+        print(f"Resumed from checkpoint at epoch={start_epoch}")
+    else:
+        if args.resume_from:
+            print(f"Warning: Resume checkpoint path {args.resume_from} does not exist, training from scratch.")
+
+    # Note: If loading optimizer/scheduler, learning rate may resume from checkpoint—overwrite if needed
+
+    for epoch in range(start_epoch, args.epochs):
         # Train
         base_model.train()
         running_loss = 0.0
@@ -373,35 +370,46 @@ if __name__ == "__main__":
             if val_losses[-1] < best_val_loss:
                 best_val_loss = val_losses[-1]
                 best_model = copy.deepcopy(base_model)
-
-        # === 更新lr scheduler ===
         if lr_scheduler is not None:
             lr_scheduler.step()
-            # 可打印当前lr
             if epoch % 100 == 0 or epoch == args.epochs - 1:
                 current_lr = optimizer.param_groups[0]['lr']
                 print(f"Epoch {epoch+1} lr: {current_lr:.6f}")
 
+        # 如果想每个epoch都保存checkpoint，可以在这里加保存代码
+        # torch.save({...}, f'./model/latest_ckpt.pt')
+
     if not args.save_best:    
-        best_model = base_model # point to the model after the last epoch
+        best_model = base_model
         print(f"Saving {args.nn_type} model after the last epoch to {TrainModelName}")
     else:
         print(f"Saving {args.nn_type} model when the validation loss is the best (val_loss={best_val_loss:.5f}) to {TrainModelName}")
-    
+
     torch.save(best_model, TrainModelName)
-    
+
+    # %% 保存完整checkpoint 方便resume
+    # 保存训练过程信息：losses，state_dict等
+    checkpoint_full = {
+        'model_state_dict': base_model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+        'lr_scheduler_state_dict': lr_scheduler.state_dict() if lr_scheduler is not None else None,
+        'train_losses': train_losses,
+        'val_losses': val_losses,
+        'best_val_loss': best_val_loss,
+        'epoch': epoch,
+        'args': vars(args),
+    }
+    if args.save_best and best_model is not None:
+        checkpoint_full['best_model_state_dict'] = best_model.state_dict()
+    torch.save(checkpoint_full, TrainModelName.replace('.pt', '_ckpt.pt'))
+
     # %%
     plot_loss(1, train_losses, val_losses, 15)
 
     # %%
     X_test_full = pd.read_csv(TEST_FEATURE_PATH)
-    
     X_test = X_test_full.iloc[:, 5:]
-    
-    
-    # print(f"X_tensor.shape: {X_tensor.shape}")
-    # print(f"y_tensor.shape: {y_tensor.shape}")
-    # print(f"X_test.shape: {X_test.shape}")
+
     # Predict on test set
     best_model.eval()
     X_test_np = X_test.values.astype(np.float32)
@@ -416,7 +424,6 @@ if __name__ == "__main__":
     wss_cols = [col for col in X_test.columns if 'dut_wss_activated_channel_index' in col.lower()]
     label_cols = [col for col in y_train.columns if 'calculated_gain_spectra' in col.lower()]
 
-    # Save to CSV (mask same as before)
     mask = X_test[wss_cols].values == 1
 
     y_pred = pd.DataFrame(np.where(mask, y_pred.values, np.nan),
@@ -427,6 +434,5 @@ if __name__ == "__main__":
     kaggle_ID = X_test_full.columns[0]
     y_pred.insert(0, kaggle_ID, X_test_full[kaggle_ID].values)
 
-    # Save predictions
     output_path = f"./submission/my_submission_{common_suffix}.csv"
     y_pred.to_csv(output_path, index=False)
