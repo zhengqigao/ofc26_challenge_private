@@ -18,20 +18,7 @@ import random
 
 print("PyTorch version:", torch.__version__)
 
-# %%
-# Utility function: load from checkpoint
-def load_checkpoint(model, checkpoint_path, map_location=None):
-    checkpoint = torch.load(checkpoint_path, map_location=map_location)
-    if isinstance(checkpoint, dict) and 'state_dict' in checkpoint:
-        model.load_state_dict(checkpoint['state_dict'])
-    elif isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
-        model.load_state_dict(checkpoint['model_state_dict'])
-    elif hasattr(model, 'load_state_dict'):
-        model.load_state_dict(checkpoint)
-    else:
-        # may be whole-model serialization (discouraged, but support if so)
-        model = checkpoint
-    return model
+
 
 # Full paths to training data
 def load_csvs(paths):
@@ -309,31 +296,9 @@ if __name__ == "__main__":
     if args.resume_from is not None and os.path.isfile(args.resume_from):
         print(f"Loading checkpoint from {args.resume_from} to resume training.")
         checkpoint = torch.load(args.resume_from, map_location=device)
-        if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
-            base_model.load_state_dict(checkpoint['model_state_dict'])
-            if 'optimizer_state_dict' in checkpoint:
-                optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-            if 'lr_scheduler_state_dict' in checkpoint and lr_scheduler is not None:
-                lr_scheduler.load_state_dict(checkpoint['lr_scheduler_state_dict'])
-            if 'train_losses' in checkpoint: train_losses = checkpoint['train_losses']
-            if 'val_losses' in checkpoint: val_losses = checkpoint['val_losses']
-            if 'best_val_loss' in checkpoint: best_val_loss = checkpoint['best_val_loss']
-            if 'epoch' in checkpoint: start_epoch = checkpoint['epoch'] + 1
-            if 'best_model_state_dict' in checkpoint and args.save_best:
-                best_model = copy.deepcopy(base_model)
-                best_model.load_state_dict(checkpoint['best_model_state_dict'])
-            else:
-                best_model = copy.deepcopy(base_model)
-        else:
-            # whole model file, fallback to torch.save(model)
-            base_model = checkpoint
-            best_model = copy.deepcopy(base_model)
-        print(f"Resumed from checkpoint at epoch={start_epoch}")
     else:
         if args.resume_from:
             print(f"Warning: Resume checkpoint path {args.resume_from} does not exist, training from scratch.")
-
-    # Note: If loading optimizer/scheduler, learning rate may resume from checkpoint—overwrite if needed
 
     for epoch in range(start_epoch, args.epochs):
         # Train
@@ -386,22 +351,6 @@ if __name__ == "__main__":
         print(f"Saving {args.nn_type} model when the validation loss is the best (val_loss={best_val_loss:.5f}) to {TrainModelName}")
 
     torch.save(best_model, TrainModelName)
-
-    # %% 保存完整checkpoint 方便resume
-    # 保存训练过程信息：losses，state_dict等
-    checkpoint_full = {
-        'model_state_dict': base_model.state_dict(),
-        'optimizer_state_dict': optimizer.state_dict(),
-        'lr_scheduler_state_dict': lr_scheduler.state_dict() if lr_scheduler is not None else None,
-        'train_losses': train_losses,
-        'val_losses': val_losses,
-        'best_val_loss': best_val_loss,
-        'epoch': epoch,
-        'args': vars(args),
-    }
-    if args.save_best and best_model is not None:
-        checkpoint_full['best_model_state_dict'] = best_model.state_dict()
-    torch.save(checkpoint_full, TrainModelName.replace('.pt', '_ckpt.pt'))
 
     # %%
     plot_loss(1, train_losses, val_losses, 15)
