@@ -18,11 +18,24 @@ import random
 
 print("PyTorch version:", torch.__version__)
 
-
 # %%
 # Full paths to training data
-TRAIN_FEATURE_PATH = f"./data/train_features.csv"
-TRAIN_LABEL_PATH   = f"./data/train_labels.csv"
+# Utility functions to load features/labels from single or multiple CSV files.
+def load_csvs(paths):
+    if isinstance(paths, (list, tuple)):
+        # concatenate on axis=0 (rows)
+        return pd.concat([pd.read_csv(p) for p in paths], axis=0, ignore_index=True)
+    else:
+        return pd.read_csv(paths)
+
+TRAIN_FEATURE_PATH = [
+    "./data/train_features.csv",
+    "./ofc-ml-challenge-data-code/Features/Train/COSMOS_features.csv"
+]
+TRAIN_LABEL_PATH = [
+    "./data/train_labels.csv",
+    "./ofc-ml-challenge-data-code/Features/Train/COSMOS_labels.csv"
+]
 
 # Full path to test data
 TEST_FEATURE_PATH = f"./data/test_features.csv"
@@ -136,9 +149,15 @@ if __name__ == "__main__":
     
     seed_everything(args.seed)
     
-    X_train = pd.read_csv(TRAIN_FEATURE_PATH).iloc[:, 3:]
-    y_train = pd.read_csv(TRAIN_LABEL_PATH)
-
+    # 使用所有特征和标签，不再取iloc裁剪
+    # X_train = pd.read_csv(TRAIN_FEATURE_PATH).iloc[:, 3:]
+    # y_train = pd.read_csv(TRAIN_LABEL_PATH)
+    # y_train.fillna(0, inplace=True)
+    # 修改为:
+    X_train = load_csvs(TRAIN_FEATURE_PATH)
+    y_train = load_csvs(TRAIN_LABEL_PATH)
+    
+    X_train = X_train.iloc[:, 3:]
     y_train.fillna(0, inplace=True)
 
     Numchannels = 95
@@ -151,7 +170,6 @@ if __name__ == "__main__":
 
     X_tensor = torch.from_numpy(X_np)
     y_tensor = torch.from_numpy(y_np)
-
 
     # Create TensorDataset
     dataset = TensorDataset(X_tensor, y_tensor)
