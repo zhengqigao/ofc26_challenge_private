@@ -20,7 +20,7 @@ seeds=(301)
 # 1. Runs with lr=0.001, no scheduler
 for seed in "${seeds[@]}"; do
     CUDA_VISIBLE_DEVICES="${idx}" python main_zq.py \
-        --epochs 1000 \
+        --epochs 5000 \
         --lr 0.001 \
         --save_best \
         --nn_type MymodelAttention \
@@ -34,7 +34,7 @@ for seed in "${seeds[@]}"; do
 
     CUDA_VISIBLE_DEVICES="${idx}" python main_zq.py \
         --epochs 2000 \
-        --lr 0.001 \
+        --lr 0.0005 \
         --save_best \
         --nn_type MymodelAttention \
         --seed "${seed}" \
