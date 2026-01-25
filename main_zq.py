@@ -157,7 +157,8 @@ if __name__ == "__main__":
     y_train.fillna(0, inplace=True)
 
     Numchannels = 95
-    # common_suffix = f"_{args.nn_type}_lr{args.lr}_bs{args.batch_size}_ep{args.epochs}_seed{args.seed}_hidden_embed_dim{args.hidden_embed_dim}_hidden_dim{args.hidden_dim}_num_layers{args.num_layers}_lr_scheduler{args.lr_scheduler}_scheduler_step_size{args.scheduler_step_size}_scheduler_gamma{args.scheduler_gamma}_scheduler_eta_min{args.scheduler_eta_min}_cosmos_ratio{args.cosmos_ratio}"
+    
+    common_suffix = f"_{args.nn_type}_lr{args.lr}_bs{args.batch_size}_ep{args.epochs}_seed{args.seed}_hidden_embed_dim{args.hidden_embed_dim}_hidden_dim{args.hidden_dim}_num_layers{args.num_layers}_lr_scheduler{args.lr_scheduler}_scheduler_step_size{args.scheduler_step_size}_scheduler_gamma{args.scheduler_gamma}_scheduler_eta_min{args.scheduler_eta_min}_cosmos_ratio{args.cosmos_ratio}"
     TrainModelName = "./model/model_" + args.nn_type + ".pt"
 
     # --- Torch: Prepare Data ---
