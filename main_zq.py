@@ -181,7 +181,9 @@ if __name__ == "__main__":
     # 原有的：X_train = load_csvs(TRAIN_FEATURE_PATH)
     X_train = all_features
     y_train = all_labels
-
+    print(f"X_train.shape: {X_train.shape}")
+    print(f"y_train.shape: {y_train.shape}")
+    
     X_train = X_train.iloc[:, 3:]
     y_train.fillna(0, inplace=True)
 
