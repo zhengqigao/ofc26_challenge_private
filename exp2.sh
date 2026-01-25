@@ -21,7 +21,7 @@ seeds=(300)
 for seed in "${seeds[@]}"; do
     CUDA_VISIBLE_DEVICES="${idx}" python main_zq.py \
         --epochs 1000 \
-        --lr 0.001 \
+        --lr 0.0005 \
         --save_best \
         --nn_type MymodelAttention \
         --batch_size 512 \
@@ -29,12 +29,12 @@ for seed in "${seeds[@]}"; do
         --hidden_embed_dim "${hidden_embed_dim}" \
         --hidden_dim "${hidden_dim}" \
         --num_layers "${num_layers}" \
-        --cosmos_ratio 15 \
-        --batch_size 128 
+        --cosmos_ratio 20 \
+        --batch_size 256 
 
     CUDA_VISIBLE_DEVICES="${idx}" python main_zq.py \
-        --epochs 1000 \
-        --lr 0.001 \
+        --epochs 2000 \
+        --lr 0.0005 \
         --save_best \
         --nn_type MymodelAttention \
         --batch_size 64 \
