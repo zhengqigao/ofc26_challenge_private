@@ -385,4 +385,4 @@ if __name__ == "__main__":
     y_pred.insert(0, kaggle_ID, X_test_full[kaggle_ID].values)
 
     output_path = f"./submission/my_submission_{common_suffix}.csv"
-    y_pred.to_csv(output_path, index=False)
+    y_pred.to_csv(output_path, index=False, float_format='%.1f')
