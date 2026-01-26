@@ -29,6 +29,5 @@ for seed in "${seeds[@]}"; do
         --hidden_dim "${hidden_dim}" \
         --num_layers "${num_layers}" \
         --cosmos_ratio 0 \
-        --batch_size 128 \
-        --resume_from "./model/model_MymodelAttention.pt"
+        --batch_size 128 
 done
