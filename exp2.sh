@@ -20,17 +20,16 @@ seeds=(200)
 # 1. Runs with lr=0.001, no scheduler
 for seed in "${seeds[@]}"; do
     CUDA_VISIBLE_DEVICES="${idx}" python main_zq.py \
-        --epochs 2000 \
+        --epochs 5000 \
         --lr 0.001 \
         --save_best \
         --nn_type MymodelAttention \
-        --batch_size 512 \
         --seed "${seed}" \
         --hidden_embed_dim "${hidden_embed_dim}" \
         --hidden_dim "${hidden_dim}" \
         --num_layers "${num_layers}" \
         --cosmos_ratio 20 \
-        --batch_size 256 
+        --batch_size 512 
 
     CUDA_VISIBLE_DEVICES="${idx}" python main_zq.py \
         --epochs 2000 \
